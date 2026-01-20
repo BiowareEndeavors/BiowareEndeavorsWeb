@@ -1,0 +1,65 @@
+.topbar {
+    left: 18px;
+    right: 18px;
+    top: 14px;
+    height: 56px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0 14px;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow);
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+}
+
+.nav-left,
+.nav-right {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    min-width: 180px;
+}
+
+.nav-left {
+    justify-content: flex-start;
+}
+
+.nav-right {
+    justify-content: flex-end;
+}
+
+.brand {
+    display: flex;
+    align-items: baseline;
+    gap: 10px;
+    user-select: none;
+    flex: 1;
+    justify-content: center;
+}
+
+.brand .title {
+    font-weight: 800;
+    letter-spacing: 0.6px;
+    font-size: 28px;
+    line-height: 1;
+}
+
+.navlink {
+    color: rgba(245, 245, 245, 0.85);
+    font-size: 13px;
+    font-weight: 700;
+    text-decoration: none;
+    padding: 8px 10px;
+    border-radius: 10px;
+    border: 1px solid rgba(255, 255, 255, 0.10);
+    background: rgba(255, 255, 255, 0.03);
+}
+
+.navlink:hover {
+    text-decoration: none;
+    color: var(--text);
+    background: rgba(255, 255, 255, 0.06);
+}

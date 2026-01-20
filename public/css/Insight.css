@@ -1,0 +1,1127 @@
+.stage {
+    position: fixed;
+    inset: 0;
+    background: var(--bg);
+}
+
+#dropOverlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.85);
+  border: 2px dashed #00ff66;
+  color: #00ff66;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 22px;
+  font-weight: 700;
+  z-index: 9999;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.15s ease;
+}
+
+#dropOverlay.active {
+  opacity: 1;
+}
+
+/* Fullscreen canvas */
+#glcanvas {
+    position: absolute;
+    inset: 0;
+    width: 100vw;
+    height: 100vh;
+    display: block;
+}
+
+/* HUD overlay */
+.hud {
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+}
+
+.hud .panel,
+.hud .topbar,
+.hud .bottombar,
+.hud .fundsbox {
+    pointer-events: auto;
+}
+
+/* Header */
+.jobs-btn { position: relative; }
+
+.jobs-badge{
+  position: absolute;
+  top: -6px;
+  right: -8px;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 6px;
+  border-radius: 999px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1;
+
+  background: #00ff66;
+  color: #061b0f;
+  border: 2px solid rgba(18,18,18,0.95);
+
+  box-shadow:
+    0 0 0 rgba(0,255,102,0.0),
+    0 0 12px rgba(0,255,102,0.55);
+
+}
+
+@keyframes jobsBtnPulse {
+  0%   { box-shadow: 0 0 0 rgba(0,255,102,0.0); }
+  50%  { box-shadow: 0 0 14px rgba(0,255,102,0.35); }
+  100% { box-shadow: 0 0 0 rgba(0,255,102,0.0); }
+}
+
+#jobsToggleBtn.jobs-attention {
+  border-radius: 10px;           /* so glow looks clean */
+  animation: jobsBtnPulse 2.2s ease-in-out infinite;
+}
+
+/* little pop when count changes */
+.jobs-badge.pop {
+  animation: badgePop 220ms ease-out;
+}
+
+@keyframes badgePop {
+  0%   { transform: scale(0.7); }
+  60%  { transform: scale(1.15); }
+  100% { transform: scale(1.0); }
+}
+
+.contextbar{
+  position: absolute;
+  top: 54px;              /* should match your .topbar height */
+  left: 0;
+  right: 0;
+  display: flex;
+  justify-content: center;
+  pointer-events: none;   /* clicks pass through to canvas/hud */
+  z-index: 50;
+}
+
+.contextbar .context-pill{
+  pointer-events: auto;   /* allow text selection/copy if desired */
+}
+
+/* Funds box (top right area, under header) */
+.fundsbox {
+    position: absolute;
+    right: 18px;
+    top: 86px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 12px;
+    background: var(--panel);
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow);
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+    user-select: none;
+}
+
+.funds-amount {
+    font-size: 13px;
+    font-weight: 800;
+    color: rgba(245, 245, 245, 0.9);
+    white-space: nowrap;
+}
+
+/* Left control panel */
+.panel {
+    position: absolute;
+    right: 18px;
+    bottom: 18px;
+    width: min(420px, calc(100vw - 36px));
+    padding: 14px;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow);
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+}
+
+.panel h4 {
+    margin: 0 0 10px 0;
+    color: var(--text);
+    font-size: 14px;
+    font-weight: 700;
+    letter-spacing: 0.5px;
+    text-transform: uppercase;
+    opacity: 0.95;
+}
+
+.field-row {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 10px;
+}
+
+.field {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 6px;
+}
+
+.field label {
+    margin: 0;
+    font-size: 12px;
+    color: var(--muted);
+}
+
+input,
+select {
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    color: var(--text);
+    padding: 10px 10px;
+    width: 100%;
+    border-radius: 10px;
+    outline: none;
+}
+
+input:focus,
+select:focus {
+    border-color: rgba(0, 255, 102, 0.7);
+    box-shadow: 0 0 0 3px rgba(0, 255, 102, 0.12);
+}
+
+select option {
+    background-color: #0c100e;
+    color: #f5f5f5;
+}
+
+.status {
+    margin-top: 5px;
+    display: grid;
+    gap: 8px;
+}
+
+.status-box {
+    font-size: 14px;
+    color: var(--muted);
+
+    position: absolute;
+    left: 10px;
+    bottom: 10px;
+
+    white-space: pre-wrap;   /* preserve line breaks */
+    word-wrap: break-word;
+
+    max-height: 50vh;        /* 50% of screen */
+    overflow-y: auto;       /* scroll after max */
+}
+
+.hint {
+    font-size: 12px;
+    color: rgba(245, 245, 245, 0.65);
+    user-select: none;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+/* Jobs modal overlay */
+.jobs-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.55);
+  display: none;
+  align-items: center;
+  justify-content: center;
+  z-index: 9999;
+}
+
+.jobs-overlay.is-open {
+  display: flex;
+}
+
+/* Jobs modal container */
+.jobs-modal {
+  width: 90vw;
+  max-height: 80vh;
+  overflow: hidden;
+  border-radius: 10px;
+  background: rgba(18, 18, 18, 0.95);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.6);
+}
+
+/* Header */
+.jobs-modal__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 14px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.jobs-modal__title {
+  font-weight: 600;
+  letter-spacing: 0.3px;
+}
+
+.jobs-modal__controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* Body */
+.jobs-modal__body {
+  display: grid;
+  grid-template-columns: 1fr 3fr;
+  gap: 12px;
+  padding: 12px 14px;
+  height: calc(80vh - 54px);
+}
+
+/* Left list */
+.jobs-list {
+  overflow: auto;
+  padding-right: 6px;
+}
+
+.jobs-item {
+  border-radius: 8px;
+  padding: 10px;
+  margin-bottom: 10px;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.jobs-item__top {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+}
+
+.jobs-item__id {
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 520px;
+}
+
+.jobs-item__meta {
+  opacity: 0.8;
+  font-size: 0.88em;
+  margin-top: 4px;
+}
+
+.jobs-item--clickable { cursor: pointer; }
+.jobs-item--clickable:focus { outline: 2px solid rgba(0,0,0,0.2); outline-offset: 2px; }
+
+.jobs-item--unseen {
+  position: relative;
+  background: linear-gradient(
+    90deg,
+    rgba(59, 246, 75, 0.14),
+    rgba(59, 246, 65, 0.03)
+  );
+}
+
+/* left accent bar */
+.jobs-item--unseen::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 6px;
+  bottom: 6px;
+  width: 3px;
+  border-radius: 3px;
+  background: #00ff66;
+}
+
+/* subtle pulse */
+@keyframes unseenPulse {
+  0%   { box-shadow: 0 0 0 rgba(59, 246, 93, 0); }
+  50%  { box-shadow: 0 0 12px rgba(59, 246, 75, 0.25); }
+  100% { box-shadow: 0 0 0 rgba(59, 246, 96, 0); }
+}
+
+.jobs-item--unseen {
+  animation: unseenPulse 2.5s ease-in-out infinite;
+}
+
+/* Right result */
+.jobs-result {
+  display: none;
+  overflow: hidden;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.jobs-result.is-open {
+  display: flex;
+  flex-direction: column;
+}
+
+.jobs-result__header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 10px 10px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.jobs-modal,
+.jobs-modal * {
+  color: rgba(255, 255, 255, 0.92);
+}
+
+.jobs-item__meta {
+  color: rgba(255, 255, 255, 0.72);
+}
+
+/* Result panel text contrast */
+.jobs-result__pre {
+  color: rgba(255, 255, 255, 0.92);
+  background: rgba(0, 0, 0, 0.35);
+}
+
+/* If Bootstrap is making buttons too dim in dark UI */
+.jobs-modal .btn-secondary {
+  color: rgba(255, 255, 255, 0.92);
+}
+
+/* Optional: make JSON keys stand out a bit by improving base font */
+.jobs-result__pre {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+}
+
+/* Small controls */
+.jobs-select {
+  width: 170px;
+}
+
+.jobs-close-x {
+  background: transparent;
+  border: 0;
+  color: rgba(255, 255, 255, 0.8);
+  font-size: 18px;
+  line-height: 1;
+  padding: 6px 8px;
+  cursor: pointer;
+}
+
+.jobs-close-x:hover {
+  color: rgba(255, 255, 255, 1);
+}
+
+/* Minimal modal (no bootstrap-js dependency) */
+.imodal { position: fixed; inset: 0; display: none; z-index: 9999; }
+.imodal.active { display: block; }
+.imodal__backdrop { position: absolute; inset: 0; background: rgba(0,0,0,0.55); }
+
+.imodal__dialog{
+  position: relative;
+  width: min(640px, calc(100% - 32px));
+  margin: 10vh auto 0 auto;
+  background: #111;
+  color: #eee;
+  border-radius: 12px;
+  box-shadow: 0 12px 40px rgba(0,0,0,0.6);
+  border: 1px solid rgba(255,255,255,0.08);
+  overflow: hidden;
+}
+
+.imodal__header{
+  display: flex; align-items: flex-start; justify-content: space-between;
+  padding: 14px 16px;
+  border-bottom: 1px solid rgba(255,255,255,0.08);
+}
+
+.imodal__title { font-size: 18px; font-weight: 600; line-height: 1.2; }
+.imodal__subtitle { font-size: 12px; opacity: 0.8; margin-top: 4px; }
+
+.imodal__x{
+  appearance: none; border: 0; background: transparent; color: #fff;
+  font-size: 26px; line-height: 1; padding: 0 6px; cursor: pointer; opacity: 0.8;
+}
+.imodal__x:hover{ opacity: 1; }
+
+.imodal__body { padding: 16px; }
+.imodal__row { display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px; }
+.imodal__label { font-size: 13px; opacity: 0.85; }
+.imodal__value { font-size: 13px; font-weight: 600; }
+
+.imodal__field { margin-bottom: 14px; }
+.imodal__label2 { display: block; margin-bottom: 6px; font-size: 13px; opacity: 0.9; }
+
+.imodal__footer{
+  display: flex; align-items: center; gap: 10px;
+  padding: 14px 16px;
+  border-top: 1px solid rgba(255,255,255,0.08);
+}
+.imodal__spacer{ flex: 1; }
+
+/* Improve bootstrap input contrast on dark modal */
+.imodal .form-control{
+  background: rgba(255,255,255,0.06);
+  color: #fff;
+  border: 1px solid rgba(255,255,255,0.14);
+}
+.imodal .form-control:focus{
+  background: rgba(255,255,255,0.08);
+  color: #fff;
+  border-color: rgba(255,255,255,0.26);
+  box-shadow: none;
+}
+
+/* Submit modal overlay */
+/* -----------------------------
+   Submit modal: override Jobs layout
+   ----------------------------- */
+
+/* reuse jobs-overlay backdrop; don't redefine a second backdrop */
+#submitOverlay.jobs-overlay {
+  z-index: 2500; /* above other HUD */
+}
+
+/* size like a normal dialog */
+.jobs-modal.submit-modal {
+  width: min(560px, calc(100vw - 24px));
+  max-height: min(90vh, 1080px);
+  display: flex;
+  flex-direction: column;
+}
+
+/* IMPORTANT: Jobs body is a 2-col grid; submit must be single column */
+.jobs-modal.submit-modal .jobs-modal__body {
+  display: block;         /* kill grid */
+  padding: 14px 16px;
+  height: auto;           /* kill calc(80vh - 54px) */
+  overflow: auto;         /* scroll if needed */
+}
+
+/* footer spacing consistent */
+.jobs-modal.submit-modal .jobs-modal__footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  padding: 12px 16px 16px;
+  border-top: 1px solid rgba(255,255,255,0.08);
+}
+
+.submit-overlay.active { display: flex; }
+
+.submit-modal__body { padding: 14px 16px; }
+
+.submit-row {
+  display: grid;
+  grid-template-columns: 140px 1fr;
+  gap: 10px;
+  align-items: center;
+  padding: 8px 0;
+}
+
+.submit-row--stack {
+  grid-template-columns: 1fr;
+  gap: 6px;
+}
+
+.submit-label {
+  opacity: 0.85;
+  font-size: 13px;
+}
+
+.submit-value {
+  font-size: 13px;
+  opacity: 0.95;
+  word-break: break-word;
+}
+
+.submit-input {
+  width: 100%;
+  padding: 10px 10px;
+  border-radius: 8px;
+  border: 1px solid rgba(255,255,255,0.14);
+  background: rgba(255,255,255,0.05);
+  color: #eee;
+  outline: none;
+}
+
+.submit-input:focus {
+  border-color: rgba(255,255,255,0.28);
+}
+
+.submit-hint {
+  font-size: 12px;
+  opacity: 0.70;
+}
+
+.submit-error {
+  display: none;
+  margin-top: 10px;
+  padding: 10px;
+  border-radius: 8px;
+  background: rgba(255, 80, 80, 0.12);
+  border: 1px solid rgba(255, 80, 80, 0.25);
+  color: #ffb3b3;
+  font-size: 13px;
+}
+
+.submit-section-title {
+  margin-top: 14px;
+  padding-top: 10px;
+  border-top: 1px solid rgba(255,255,255,0.08);
+}
+.submit-section-title:first-of-type {
+  border-top: none;
+  margin-top: 0;
+  padding-top: 0;
+}
+
+.submit-error.active { display: block; }
+
+.submit-tooltip-wrap {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+}
+
+.submit-tooltip {
+  position: absolute;
+  bottom: calc(100% + 8px);
+  right: 0;
+  background: rgba(0,0,0,0.9);
+  color: #fff;
+  font-size: 12px;
+  padding: 6px 8px;
+  border-radius: 6px;
+  border: 1px solid rgba(255,255,255,0.12);
+  white-space: nowrap;
+  opacity: 0;
+  transform: translateY(2px);
+  pointer-events: none;
+  transition: opacity 120ms ease, transform 120ms ease;
+}
+
+.submit-tooltip-wrap:hover .submit-tooltip { opacity: 1; transform: translateY(0); }
+
+.jobs-modal.submit-modal .submit-row {
+  padding: 10px 0;
+  border-bottom: 1px solid rgba(255,255,255,0.08);
+}
+.jobs-modal.submit-modal .submit-row:last-of-type {
+  border-bottom: 0;
+}
+
+/* --------------------------------
+   Insight button theme (Submit modal)
+   -------------------------------- */
+
+.jobs-modal.submit-modal .btn {
+  background: rgba(255,255,255,0.06);
+  border: 1px solid rgba(255,255,255,0.12);
+  color: #eaeaea;
+  border-radius: 10px;
+  padding: 8px 14px;
+  font-size: 13px;
+  font-weight: 500;
+  transition: background 120ms ease, border 120ms ease, transform 80ms ease;
+}
+
+.jobs-modal.submit-modal .btn:hover {
+  background: rgba(255,255,255,0.10);
+  border-color: rgba(255,255,255,0.18);
+}
+
+.jobs-modal.submit-modal .btn:active {
+  transform: translateY(1px);
+}
+
+.jobs-modal.submit-modal .btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+/* Primary action */
+.jobs-modal.submit-modal .btn-primary {
+  background: linear-gradient(180deg, #3b82f6, #2563eb);
+  border-color: #2563eb;
+  color: #fff;
+}
+
+.jobs-modal.submit-modal .btn-primary:hover {
+  background: linear-gradient(180deg, #4f8df8, #2563eb);
+}
+
+/* Secondary action */
+.jobs-modal.submit-modal .btn-secondary {
+  background: rgba(255,255,255,0.04);
+  border-color: rgba(255,255,255,0.14);
+  color: #ddd;
+}
+
+
+/* =========================
+   Visualization panel UI
+   ========================= */
+
+.viz-collapsible {
+  margin-top: 10px;
+  border: 1px solid rgba(255,255,255,0.12);
+  border-radius: 10px;
+  overflow: hidden;
+  background: rgba(0,0,0,0.25);
+}
+
+.viz-header {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px 12px;
+  background: rgba(0,0,0,0.15);
+  border: none;
+  color: inherit;
+  cursor: pointer;
+  text-align: left;
+}
+
+.viz-title {
+  font-size: 13px;
+  letter-spacing: 0.2px;
+}
+
+.viz-chevron {
+  font-size: 14px;
+  line-height: 1;
+  opacity: 0.9;
+  transform: rotate(0deg);
+  transition: transform 120ms ease;
+}
+
+.viz-collapsible.is-collapsed .viz-chevron {
+  transform: rotate(-90deg);
+}
+
+.viz-body {
+  padding: 10px 12px 12px;
+}
+
+.viz-collapsible.is-collapsed .viz-body {
+  display: none;
+}
+
+/* rows */
+.viz-row {
+  display: grid;
+  grid-template-columns: 160px 1fr 92px;
+  align-items: center;
+  gap: 10px;
+}
+
+.viz-mode {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.viz-radio {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+  cursor: pointer;
+  user-select: none;
+}
+
+.viz-group {
+  margin-top: 8px;
+}
+
+.viz-group:last-child {
+  margin-bottom: 0;
+}
+
+.viz-group-title {
+  font-size: 12px;
+  opacity: 0.85;
+  margin: 6px 0 8px;
+}
+
+.viz-control {
+  margin-bottom: 10px;
+}
+
+.viz-control:last-child {
+  margin-bottom: 0;
+}
+
+.viz-param {
+  font-size: 12px;
+  opacity: 0.95;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* slider */
+.viz-slider {
+  width: 100%;
+}
+
+/* numeric input */
+.viz-input {
+  width: 92px;
+  padding: 4px 6px;
+  border-radius: 8px;
+  border: 1px solid rgba(255,255,255,0.14);
+  background: rgba(0,0,0,0.25);
+  color: inherit;
+  font-size: 12px;
+  line-height: 1.2;
+}
+
+.viz-input:focus {
+  outline: none;
+  border-color: rgba(255,255,255,0.35);
+  box-shadow: 0 0 0 2px rgba(255,255,255,0.08);
+}
+
+/* remove number spinners */
+.viz-input::-webkit-outer-spin-button,
+.viz-input::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
+.viz-input[type="number"] {
+  -moz-appearance: textfield;
+}
+
+/* =========================
+   Job action panel
+   ========================= */
+
+.jobs-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 12px;
+}
+
+.jobs-actions__row {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+/* Buttons inside action panel */
+.jobs-actions .btn {
+  font-weight: 700;
+  border-radius: 10px;
+}
+
+/* Primary action */
+.jobs-actions .btn-primary {
+  background: var(--accent);
+  color: #06110a;
+  border: none;
+}
+
+.jobs-actions .btn-primary:hover {
+  background: #00e85d;
+}
+
+/* Secondary */
+.jobs-actions .btn-secondary {
+  background: rgba(255,255,255,0.06);
+  border: 1px solid rgba(255,255,255,0.14);
+}
+
+.jobs-actions .btn-secondary:hover {
+  background: rgba(255,255,255,0.09);
+}
+
+/* Visualize button */
+.jobs-actions .btn-success {
+  background: rgba(0,255,102,0.15);
+  border: 1px solid rgba(0,255,102,0.35);
+  color: var(--accent);
+}
+
+.jobs-actions .btn-success:hover {
+  background: rgba(0,255,102,0.22);
+}
+
+/* Disabled state */
+.jobs-actions .btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+/* Hint text */
+.jobs-actions__hint {
+  font-size: 12px;
+  color: rgba(245,245,245,0.65);
+  padding-top: 4px;
+  border-top: 1px dashed rgba(255,255,255,0.12);
+}
+
+/* JSON viewer inside actions */
+.jobs-actions .jobs-result__pre {
+  margin-top: 10px;
+  max-height: 45vh;
+  overflow: auto;
+  border-radius: 8px;
+}
+
+/* --- Add Funds modal --- */
+/* ---------- Add Funds Modal (standalone) ---------- */
+.funds-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.55);
+  backdrop-filter: blur(6px);
+  display: none;
+  z-index: 9999;
+}
+
+.funds-overlay.is-open {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 18px;
+}
+
+.funds-modal {
+  width: min(520px, 100%);
+  border-radius: 16px;
+  background: rgba(18, 18, 22, 0.92);
+  border: 1px solid rgba(255,255,255,0.12);
+  box-shadow: 0 20px 60px rgba(0,0,0,0.55);
+  color: #fff;
+  overflow: hidden;
+}
+
+.funds-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 16px;
+  border-bottom: 1px solid rgba(255,255,255,0.10);
+}
+
+.funds-title {
+  font-size: 16px;
+  font-weight: 700;
+  letter-spacing: 0.2px;
+}
+
+.funds-body {
+  padding: 16px;
+}
+
+.funds-presets {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.funds-preset {
+  border: 1px solid rgba(255,255,255,0.14);
+  background: rgba(255,255,255,0.06);
+  color: #fff;
+  border-radius: 12px;
+  padding: 10px 12px;
+  font-size: 14px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: transform 0.06s ease, background 0.12s ease, border-color 0.12s ease;
+}
+
+.funds-preset:hover {
+  transform: translateY(-1px);
+  background: rgba(0, 255, 51, 0.1);
+  border-color: rgba(255,255,255,0.22);
+}
+
+.funds-preset.is-selected {
+  background: rgba(0, 255, 51, 0.1);
+  border-color: rgba(0, 255, 17, 0.55);
+}
+
+.funds-hint {
+  margin-top: 8px;
+  font-size: 12px;
+  opacity: 0.75;
+}
+
+.funds-error {
+  margin-top: 10px;
+  font-size: 12px;
+  color: #ffb3b3;
+  display: none;
+}
+
+.funds-error.is-open {
+  display: block;
+}
+
+.funds-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  padding: 12px 16px 16px;
+}
+
+/* Overlay */
+.paymentModal_overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.55);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 9999;
+
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.2s ease;
+}
+
+/* Visible state */
+.paymentModal_overlay.paymentModal_open {
+  opacity: 1;
+  pointer-events: all;
+}
+
+/* Container */
+.paymentModal_container {
+  background: #0f1115;
+  border-radius: 14px;
+  width: 420px;
+  max-width: 90%;
+  padding: 28px 26px 26px;
+  text-align: center;
+  box-shadow: 0 20px 60px rgba(0,0,0,0.6);
+  animation: paymentModal_pop 0.25s ease;
+}
+
+/* Check icon */
+.paymentModal_icon {
+  width: 64px;
+  height: 64px;
+  margin: 0 auto 14px;
+  border-radius: 50%;
+  background: #00ff88;
+  color: #001a0d;
+  font-size: 36px;
+  font-weight: bold;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* Title */
+.paymentModal_title {
+  margin: 6px 0 10px;
+  font-size: 22px;
+  font-weight: 600;
+  color: #ffffff;
+}
+
+/* Message */
+.paymentModal_message {
+  font-size: 15px;
+  line-height: 1.5;
+  color: #b8bcc6;
+  margin-bottom: 22px;
+}
+
+/* Button */
+.paymentModal_button {
+  background: #00ff88;
+  border: none;
+  border-radius: 10px;
+  padding: 10px 22px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  color: #001a0d;
+}
+
+.paymentModal_button:hover {
+  filter: brightness(1.1);
+}
+
+/* Animation */
+@keyframes paymentModal_pop {
+  from {
+    transform: scale(0.9);
+    opacity: 0;
+  }
+  to {
+    transform: scale(1);
+    opacity: 1;
+  }
+}
+
+/* Mobile: 2 columns for presets */
+@media (max-width: 420px) {
+  .funds-presets {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+/* responsive */
+@media (max-width: 520px) {
+  .viz-row {
+    grid-template-columns: 120px 1fr 78px;
+  }
+
+  .viz-input {
+    width: 78px;
+  }
+}
+
+@media (max-width: 720px) {
+    .brand {
+    display: none;
+    }
+    .nav-left, .nav-right {
+    min-width: unset;
+    }
+}
+
+@media (max-width: 520px) {
+    .topbar {
+    height: auto;
+    padding: 10px;
+    gap: 10px;
+    flex-wrap: wrap;
+    }
+
+    .panel {
+    top: 146px;
+    }
+
+    .fundsbox {
+    top: 146px;
+    }
+
+    .hint {
+    display: none;
+    }
+}

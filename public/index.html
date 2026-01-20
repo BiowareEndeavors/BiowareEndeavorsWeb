@@ -1,0 +1,354 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no" />
+  <link rel="stylesheet"
+    href="https://maxcdn.bootstrapcdn.com/bootstrap/4.0.0/css/bootstrap.min.css"
+    integrity="sha384-Gn5384xqQ1aoWXA+058RXPxPg6fy4IWvTNh0E263XmFcJlSAwiGgFAW/dAiS6JXm"
+    crossorigin="anonymous">
+
+  <link rel="stylesheet" href="css/all.css"> 
+  <link rel="stylesheet" href="css/topbar.css"> 
+  <link rel="stylesheet" href="css/insight.css">
+
+  <title>Insight</title>
+
+</head>
+
+<body>
+  <div id="dropOverlay">
+    Drop .XML file to run simulation
+  </div>
+
+  <!-- Jobs modal -->
+  <div id="jobsOverlay" class="jobs-overlay" aria-hidden="true">
+    <div class="jobs-modal" role="dialog" aria-modal="true" aria-label="Jobs">
+      <div class="jobs-modal__header">
+        <div class="jobs-modal__title">Jobs</div>
+
+        <div class="jobs-modal__controls">
+          <button class="jobs-close-x" type="button" id="jobsCloseBtn" title="Close">×</button>
+        </div>
+      </div>
+
+      <div class="jobs-modal__body">
+        <div id="jobsList" class="jobs-list"></div>
+
+        <!-- Action panel (replaces JSON-only panel) -->
+        <div id="jobResultWrap" class="jobs-result">
+          <div class="jobs-result__header">
+            <div class="status-text" id="jobActionsTitle">Job</div>
+            <button class="btn btn-sm btn-secondary" type="button" id="jobResultCloseBtn">Close</button>
+          </div>
+
+          <div id="jobActionsBody" class="jobs-actions">
+            <div class="jobs-actions__row">
+              <button class="btn btn-sm btn-success" type="button" id="jobVisualizeBtn">Visualize</button>
+            </div>
+            <div class="jobs-actions__row">
+              <button class="btn btn-sm btn-primary" type="button" id="jobViewJsonBtn">View output.json</button>
+              <button class="btn btn-sm btn-secondary" type="button" id="jobDownloadJsonBtn">Download output.json</button>
+            </div>
+
+            <div class="jobs-actions__hint" id="jobActionsHint"></div>
+
+            <!-- JSON viewer (toggleable) -->
+            <pre id="jobResultJson" class="jobs-result__pre" style="display:none;"></pre>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Submit Job modal -->
+  <div id="submitOverlay" class="jobs-overlay submit-overlay" aria-hidden="true">
+    <div class="jobs-modal submit-modal" role="dialog" aria-modal="true" aria-label="Submit job">
+      <div class="jobs-modal__header">
+        <div class="jobs-modal__title">Submit Job</div>
+        <div class="jobs-modal__controls">
+          <button class="jobs-close-x" type="button" id="submitCloseBtn" title="Close">×</button>
+        </div>
+      </div>
+
+      <div class="jobs-modal__body">
+
+        <!-- INPUT -->
+        <div class="submit-section-title">Input</div>
+
+        <div class="submit-row">
+          <div class="submit-label">File</div>
+          <div class="submit-value" id="submitFileName">—</div>
+        </div>
+
+        <div class="submit-row">
+          <div class="submit-label">Atoms</div>
+          <div class="submit-value" id="submitAtomCount">—</div>
+        </div>
+
+        <div class="submit-hint" style="margin-bottom:8px;">
+          Pressure tested for systems < 100 atoms. For systems larger than this use at your own risk. 
+        </div>
+
+        <!-- SIMULATION DEFAULTS -->
+        <div class="submit-section-title">Simulation Defaults</div>
+
+        <div class="submit-row">
+          <div class="submit-label">Basis set</div>
+          <div class="submit-value" id="submitBasisSet">def2-SVP</div>
+        </div>
+
+        <div class="submit-row">
+          <div class="submit-label">Functional</div>
+          <div class="submit-value" id="submitFunctional">r2SCAN</div>
+        </div>
+
+        <div class="submit-row">
+          <div class="submit-label">SCF tolerance</div>
+          <div class="submit-value" id="submitScfTol">1e-4</div>
+        </div>
+
+        <div class="submit-hint" style="margin-bottom:8px;">
+          Defaults shown for transparency. Customization coming soon.
+        </div>
+
+
+        <!-- JOB SETTINGS -->
+        <div class="submit-section-title">Job Settings</div>
+
+        <div class="submit-row submit-row--stack">
+          <label class="submit-label" for="submitNickname">Nickname</label>
+          <input class="submit-input" id="submitNickname" type="text" autocomplete="off" />
+          <div class="submit-hint">Shown in Jobs list.</div>
+        </div>
+
+        <!--
+        <div class="submit-row submit-row--stack">
+          <label class="submit-label" for="submitMaxRuntime">Max runtime (minutes)</label>
+          <input class="submit-input" id="submitMaxRuntime" type="number"
+                min="1" max="1440" step="1" />
+          <div class="submit-hint">Job will be cancelled after this limit.</div>
+        </div>
+        -->
+
+        <div class="submit-error" id="submitError" role="alert"></div>
+
+      </div>
+
+
+      <div class="jobs-modal__footer submit-footer">
+        <button class="btn btn-sm btn-secondary" type="button" id="submitPointSolveBtn">Point Solve</button>
+
+        <span class="submit-tooltip-wrap">
+          <button class="btn btn-sm btn-secondary" type="button" id="submitOptimizeBtn" disabled>Optimize Geometry</button>
+          <span class="submit-tooltip">Coming soon</span>
+        </span>
+      </div>
+    </div>
+  </div>
+
+  <!-- Add Funds Modal -->
+  <div id="fundsOverlay" class="funds-overlay" aria-hidden="true">
+    <div class="funds-modal" role="dialog" aria-modal="true" aria-label="Add funds">
+      <div class="funds-header">
+        <div class="funds-title">Add Funds</div>
+      </div>
+
+      <div class="funds-body">
+        <div class="funds-presets" id="fundsPresets">
+          <button class="funds-preset" type="button" data-amt="5">$5</button>
+          <button class="funds-preset" type="button" data-amt="10">$10</button>
+          <button class="funds-preset" type="button" data-amt="25">$25</button>
+          <button class="funds-preset" type="button" data-amt="50">$50</button>
+          <button class="funds-preset" type="button" data-amt="100">$100</button>
+          <button class="funds-preset" type="button" data-amt="250">$250</button>
+        </div>
+
+        <div class="funds-hint">You will be redirected to Stripe for a secure checkout.</div>
+        <div class="funds-hint">
+          By completing this purchase, you confirm that you agree to our
+          <a href="/terms" target="_blank" rel="noopener noreferrer">
+            Terms of Use
+          </a>.
+        </div>
+        <div class="funds-error" id="fundsError" role="alert"></div>
+      </div>
+
+      <div class="funds-footer">
+        <button class="btn btn-sm btn-secondary" type="button" id="fundsCancelBtn">Cancel</button>
+        <button class="btn btn-sm btn-success" type="button" id="fundsCheckoutBtn">Continue</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Payment Success Modal -->
+  <div id="paymentModal_overlay" class="paymentModal_overlay">
+    <div class="paymentModal_container">
+
+      <div class="paymentModal_icon">✓</div>
+
+      <h2 class="paymentModal_title">
+        Payment Successful
+      </h2>
+
+      <p class="paymentModal_message">
+        Your funds are being applied to your account.<br>
+        This usually takes a few seconds.
+      </p>
+
+      <button id="paymentModal_close" class="paymentModal_button">
+        Got it
+      </button>
+
+    </div>
+  </div>
+
+  <div class="stage">
+    <canvas id="glcanvas"></canvas>
+
+    <div class="hud">
+      <!-- Header -->
+      <div id="topbarMount"></div>
+
+      <!-- Funds box -->
+      <div class="fundsbox">
+        <span class="funds-amount" id="fundsAmount">-</span>
+        <button class="btn-insight btn-plus" type="button" onclick="openAddFundsModal()">+</button>
+      </div>
+
+      <!-- Controls panel -->
+      <div class="panel viz-collapsible" id="vizCollapsible">
+        <button class="viz-header" type="button" id="vizToggleBtn" aria-expanded="true" aria-controls="vizBody">
+          <div class="" id="viewContext">Caffeine</div>
+          <span class="viz-chevron" aria-hidden="true">▾</span>
+        </button>
+        <div class="viz-body" id="vizBody">
+          <!-- Render mode -->
+          <div class="viz-row viz-mode">
+            <label class="viz-radio">
+              <input type="radio" name="vizMode" id="vizModeVolume" value="volume" checked />
+              <span>Volume</span>
+            </label>
+
+            <label class="viz-radio">
+              <input type="radio" name="vizMode" id="vizModeIso" value="iso" />
+              <span>Isosurface</span>
+            </label>
+          </div>
+
+          <!-- Volume controls -->
+          <div class="viz-group" id="vizGroupVolume">
+            <div class="viz-group-title">Volume</div>
+
+            <div class="viz-control">
+              <div class="viz-row">
+                <div class="viz-param">Quality</div>
+                <input class="viz-slider" id="ui_quality" type="range" min="0.25" max="4.0" step="0.01" value="0.5" />
+                <input class="viz-input" id="ui_quality_in" type="number" min="0.25" max="4.0" step="0.01" value="0.5" />
+              </div>
+            </div>
+
+            <div class="viz-control">
+              <div class="viz-row">
+                <div class="viz-param">Density scale</div>
+                <input class="viz-slider" id="ui_density_scale" type="range" min="0.0001" max="0.2" step="0.0001" value="0.02" />
+                <input class="viz-input" id="ui_density_scale_in" type="number" min="0.0001" max="0.2" step="0.0001" value="0.02" />
+              </div>
+            </div>
+
+            <div class="viz-control">
+              <div class="viz-row">
+                <div class="viz-param">Log contrast</div>
+                <input class="viz-slider" id="ui_log_contrast" type="range" min="0.1" max="50.0" step="0.1" value="10.0" />
+                <input class="viz-input" id="ui_log_contrast_in" type="number" min="0.1" max="50.0" step="0.1" value="10.0" />
+              </div>
+            </div>
+
+            <div class="viz-control">
+              <div class="viz-row">
+                <div class="viz-param">Transparency start</div>
+                <input class="viz-slider" id="ui_alpha_start" type="range" min="0.0" max="1.0" step="0.01" value="0.05" />
+                <input class="viz-input" id="ui_alpha_start_in" type="number" min="0.0" max="1.0" step="0.01" value="0.05" />
+              </div>
+            </div>
+
+            <div class="viz-control">
+              <div class="viz-row">
+                <div class="viz-param">Transparency end</div>
+                <input class="viz-slider" id="ui_alpha_end" type="range" min="0.0" max="1.0" step="0.01" value="0.35" />
+                <input class="viz-input" id="ui_alpha_end_in" type="number" min="0.0" max="1.0" step="0.01" value="0.35" />
+              </div>
+            </div>
+
+            <div class="viz-control">
+              <div class="viz-row">
+                <div class="viz-param">Opacity</div>
+                <input class="viz-slider" id="ui_opacity" type="range" min="0.1" max="4.0" step="0.01" value="1.0" />
+                <input class="viz-input" id="ui_opacity_in" type="number" min="0.1" max="4.0" step="0.01" value="1.0" />
+              </div>
+            </div>
+          </div>
+
+          <!-- Iso controls -->
+          <div class="viz-group" id="vizGroupIso" style="display:none;">
+            <div class="viz-group-title">Isosurface</div>
+
+            <div class="viz-control">
+              <div class="viz-row">
+                <div class="viz-param">Isovalue</div>
+                <input class="viz-slider" id="ui_isovalue" type="range" min="0.000001" max="0.1" step="0.000001" value="0.001" />
+                <input class="viz-input" id="ui_isovalue_in" type="number" min="0.000001" max="0.1" step="0.000001" value="0.001" />
+              </div>
+            </div>
+          </div>
+
+        </div>
+      </div>
+      
+      <div id="loadingText" class="status-text status-box"></div>
+
+    </div>
+  </div>
+
+  <script src="src/gl-matrix-min.js"></script>
+  <script src="src/webgl-util.js"></script>
+  <script src="src/shader-srcs.js"></script>
+  <script src="src/volume-raycaster.js"></script>
+
+  <script type="module" src="/src/require-auth.js"></script>
+  <script type="module" src="/src/topbar.js"></script>
+  <script type="module" src="/src/molecule-drop.js"></script>
+  <script type="module" src="/src/submit-modal.js"></script>
+  <script type="module" src="/src/jobs-ui.js"></script>
+  <script type="module" src="/src/jobs-badge.js"></script>
+  <script type="module" src="/src/fundsHandler.js"></script>
+
+  <script>
+    fetch("/partials/topbar.html")
+      .then(r => r.text())
+      .then(html => {document.getElementById("topbarMount").innerHTML = html;
+    });
+
+    function toggleFullscreen() {
+      const root = document.documentElement; // <html>
+      if (!document.fullscreenElement) {
+        root.requestFullscreen().catch(err => {
+          alert(`Error enabling fullscreen: ${err.message} (${err.name})`);
+        });
+      } else {
+        document.exitFullscreen();
+      }
+    }
+  </script>
+
+  <script>
+    // Set a default dropdown selection after your JS populates it
+    window.addEventListener('load', () => {
+      const cmap = document.getElementById("colormapList");
+      if (cmap && cmap.options.length > 0) cmap.value = "Cool Warm";
+    });
+  </script>
+</body>
+
+</html>

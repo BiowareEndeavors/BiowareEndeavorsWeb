@@ -1,0 +1,21 @@
+{
+  "name": "insightrenderer",
+  "version": "1.0.0",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "description": "",
+  "dependencies": {
+    "@stripe/firestore-stripe-payments": "^0.0.6",
+    "express": "^5.2.1",
+    "firebase": "^12.8.0",
+    "webgl": "^0.0.7"
+  },
+  "devDependencies": {
+    "lite-server": "^2.6.1"
+  }
+}

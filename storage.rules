@@ -1,0 +1,17 @@
+rules_version = '2';
+
+service firebase.storage {
+  match /b/{bucket}/o {
+
+    match /densityGrids/{jobId}/density.bin {
+      allow read: if request.auth != null && firestore.get(/databases/(default)/documents/jobs/$(jobId)).data.uid == request.auth.uid;
+
+      allow write: if false;
+    }
+
+    // default deny
+    match /{allPaths=**} {
+      allow read, write: if false;
+    }
+  }
+}

@@ -1,0 +1,209 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Insight</title>
+  <link rel="stylesheet" href="css/all.css">
+  <link rel="stylesheet" href="css/auth.css">
+  <link rel="stylesheet" href="css/topbar.css">
+</head>
+
+<body>
+
+  <div id="topbarMount"></div>
+
+  <div class="auth-landing">
+
+    <!-- LEFT: marketing -->
+    <section class="marketing">
+      <h1 class="headline">
+        Pay as you go cloud GPU-accelerated DFT in the browser.
+      </h1>
+
+      <p class="subhead">
+        Submit a molecule, run a point solve, and visualize/download densities directly in the web app.
+        Electronic structure will be calculated using our custom built DFT software ran on a cluster of GPUs in the cloud. 
+      </p>
+
+      <!-- Optional image area (drop in later) -->
+      <div class="hero-media">
+        <img src="assets/preview.png" alt="Density visualization preview">
+      </div>
+
+      <div class="grid-2">
+        <div class="info-card">
+          <div class="info-title">Benchmarks</div>
+          <div class="info-sub">Wall times and point solve costs for def2-SVP, r2SCAN calculations ran on 2 H200 GPUs</div>
+
+          <div class="bench-list">
+            <div class="bench-row">
+              <div class="bench-name">Aspirin</div>
+              <div class="bench-meta">21 Atoms</div>
+              <div class="bench-time">3.5s</div>
+              <div class="bench-cost">$0.06</div>
+            </div>
+            <div class="bench-row">
+              <div class="bench-name">Caffeine</div>
+              <div class="bench-meta">24 Atoms</div>
+              <div class="bench-time">3.9s</div>
+              <div class="bench-cost">$0.06</div>
+            </div>
+            <div class="bench-row">
+              <div class="bench-name">Nicotine</div>
+              <div class="bench-meta">26 Atoms</div>
+              <div class="bench-time">4.3s</div>
+              <div class="bench-cost">$0.06</div>
+            </div>
+            <div class="bench-row">
+              <div class="bench-name">Morphine</div>
+              <div class="bench-meta">40 Atoms</div>
+              <div class="bench-time">7.3s</div>
+              <div class="bench-cost">$0.09</div>
+            </div>
+            <div class="bench-row">
+              <div class="bench-name">Penicillin</div>
+              <div class="bench-meta">41 Atoms</div>
+              <div class="bench-time">10.6s</div>
+              <div class="bench-cost">$0.12</div>
+            </div>
+            <div class="bench-row">
+              <div class="bench-name">Testosterone</div>
+              <div class="bench-meta">49 Atoms</div>
+              <div class="bench-time">7.3s</div>
+              <div class="bench-cost">$0.09</div>
+            </div>
+            <div class="bench-row">
+              <div class="bench-name">VitaminD3</div>
+              <div class="bench-meta">72 Atoms</div>
+              <div class="bench-time">17.1s</div>
+              <div class="bench-cost">$0.19</div>
+            </div>
+            <div class="bench-row">
+              <div class="bench-name">Remdesivir</div>
+              <div class="bench-meta">77 Atoms</div>
+              <div class="bench-time">35.3s</div>
+              <div class="bench-cost">$0.36</div>
+            </div>
+            <div class="bench-row">
+              <div class="bench-name">VitaminK</div>
+              <div class="bench-meta">79 Atoms</div>
+              <div class="bench-time">19.6s</div>
+              <div class="bench-cost">$0.20</div>
+            </div>
+            <div class="bench-row">
+              <div class="bench-name">VitaminE</div>
+              <div class="bench-meta">81 Atoms</div>
+              <div class="bench-time">34.6s</div>
+              <div class="bench-cost">$0.36</div>
+            </div>
+          </div>
+
+          <div class="fineprint">
+            Metrics will vary depending on hardware assigned to your job.
+          </div>
+        </div>
+
+        <div class="info-card">
+          <div class="info-title">What you get today</div>
+          <ul class="bullets">
+            <li>Stress tested on systems up to 100 atoms</li>
+            <li>Point solves (KS-DFT) using def2-SVP and r2SCAN</li>
+            <li>Density visualization (volume + isosurface)</li>
+            <li>Job history + result retrieval (total energy metrics and density grid)</li>
+            <li>Web-first workflow</li>
+          </ul>
+
+          <div class="divider"></div>
+
+          <div class="info-title">Coming soon</div>
+          <ul class="bullets muted">
+            <li>More basis function and Exc functional options</li>
+            <li>Linearly scaling computation on large systems</li>
+            <li>Forces</li>
+            <li>Geometry optimization</li>
+            <li>Better reporting/export (energies, orbitals, etc.)</li>
+            <li>ML Accelerated QMMD</li>
+            <li>Excited States</li>
+          </ul>
+        </div>
+      </div>
+
+      <div class="legal-row">
+        <a class="legal-link" href="/terms" target="_blank" rel="noopener noreferrer">Terms and Privacy</a>
+      </div>
+    </section>
+
+    <!-- RIGHT: auth card -->
+    <section class="auth-side">
+      <div class="auth-card" id="authCard">
+
+        <h2 id="formTitle">Login</h2>
+
+        <!-- Inline error banner -->
+        <div id="formError" class="form-error hidden" role="alert" aria-live="polite">
+          <div class="form-error__icon">!</div>
+          <div class="form-error__text" id="formErrorText"></div>
+        </div>
+
+        <form onsubmit="handleSubmit(event)">
+
+          <div class="field">
+            <label for="email">Email</label>
+            <input type="email" id="email" required autocomplete="email">
+            <div class="hint hidden" id="emailHint"></div>
+          </div>
+
+          <div class="field">
+            <label for="password">Password</label>
+            <input type="password" id="password" required autocomplete="current-password">
+            <div class="hint hidden" id="passwordHint"></div>
+          </div>
+
+          <!-- Sign up only -->
+          <div class="field hidden" id="confirmPasswordField">
+            <label for="confirmPassword">Confirm Password</label>
+            <input type="password" id="confirmPassword" autocomplete="new-password">
+            <div class="hint hidden" id="confirmHint"></div>
+          </div>
+
+          <!-- Terms checkbox (signup only) -->
+          <div class="terms-row hidden" id="termsRow">
+            <label class="terms-label">
+              <input type="checkbox" id="termsCheckbox">
+              <span>
+                I agree to the
+                <a href="/terms" target="_blank" rel="noopener noreferrer">Terms of Use</a>
+              </span>
+            </label>
+          </div>
+
+          <button class="btn-main" type="submit" id="submitBtn">Login</button>
+        </form>
+
+        <div class="switch">
+          <span id="switchText">Don't have an account?</span>
+          <button class="link-btn" type="button" onclick="toggleMode()" id="switchBtn">Sign up</button>
+        </div>
+
+        <div class="mini-note">
+          Ultra-fast computations. Clean UI. Pay as you go. 
+        </div>
+
+      </div>
+    </section>
+
+  </div>
+
+  <script type="module" src="/src/auth.js"></script>
+  <script type="module" src="/src/topbar.js"></script>
+  <script>
+    fetch("/partials/topbar.html")
+      .then(r => r.text())
+      .then(html => {document.getElementById("topbarMount").innerHTML = html;
+    });
+  </script>
+</body>
+
+</html>
