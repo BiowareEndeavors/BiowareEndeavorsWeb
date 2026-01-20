@@ -8,8 +8,8 @@ import {
   orderBy,
   limit,
   onSnapshot,
-  updateDoc, 
-  doc
+  updateDoc,
+  doc,
 } from "https://www.gstatic.com/firebasejs/12.8.0/firebase-firestore.js";
 
 import { getFunctions, httpsCallable } from "https://www.gstatic.com/firebasejs/12.8.0/firebase-functions.js";
@@ -23,8 +23,7 @@ const FUNCTIONS_REGION = "us-central1";
 const functions = getFunctions(app, FUNCTIONS_REGION);
 const cancelJobCallable = httpsCallable(functions, "cancel_job");
 
-const elToggleBtn = document.getElementById("jobsToggleBtn");
-
+// Elements that are always in the base HTML (safe to grab now)
 const elOverlay = document.getElementById("jobsOverlay");
 const elCloseBtn = document.getElementById("jobsCloseBtn");
 
@@ -36,14 +35,17 @@ const elResultWrap = document.getElementById("jobResultWrap");
 const elResultJson = document.getElementById("jobResultJson");
 const elResultCloseBtn = document.getElementById("jobResultCloseBtn");
 
-// NEW action UI elements
 const elActionsTitle = document.getElementById("jobActionsTitle");
 const elActionsHint = document.getElementById("jobActionsHint");
 const elViewJsonBtn = document.getElementById("jobViewJsonBtn");
 const elDownloadJsonBtn = document.getElementById("jobDownloadJsonBtn");
 const elVisualizeBtn = document.getElementById("jobVisualizeBtn");
-const el = document.getElementById("viewContext");
+const elViewContext = document.getElementById("viewContext");
 
+// Elements that live inside topbar.html (NOT safe to grab until topbar injected)
+let elToggleBtn = null;
+
+// state
 let _authUser = null;
 let _open = false;
 
@@ -53,9 +55,15 @@ let _hasLoadedOnce = false;
 // currently selected job
 let _selectedJob = null;
 
+// prevent double-binding if topbar:ready fires more than once
+let _topbarBound = false;
+
+// ------------------------------
+// Public helpers
+// ------------------------------
 window.setViewContext = function setViewContext(text) {
-  if (!el) return;
-  el.textContent = text || "No molecule loaded";
+  if (!elViewContext) return;
+  elViewContext.textContent = text || "No molecule loaded";
 };
 
 window.loadDensityFromFirebaseUrl = function (url) {
@@ -65,7 +73,6 @@ window.loadDensityFromFirebaseUrl = function (url) {
   }
 
   loadVolumeBinFromUrl(url, function (vol) {
-
     var volDims = vol.dims;
 
     gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1);
@@ -74,49 +81,50 @@ window.loadDensityFromFirebaseUrl = function (url) {
     gl.activeTexture(gl.TEXTURE0);
     gl.bindTexture(gl.TEXTURE_3D, tex);
 
-    gl.texStorage3D(gl.TEXTURE_3D, 1, gl.R16F,
-      volDims[0], volDims[1], volDims[2]);
+    gl.texStorage3D(gl.TEXTURE_3D, 1, gl.R16F, volDims[0], volDims[1], volDims[2]);
 
-    var halfFloatLinearOK =
-      !!gl.getExtension("OES_texture_half_float_linear");
+    var halfFloatLinearOK = !!gl.getExtension("OES_texture_half_float_linear");
 
-    gl.texParameteri(gl.TEXTURE_3D,
+    gl.texParameteri(
+      gl.TEXTURE_3D,
       gl.TEXTURE_MIN_FILTER,
-      halfFloatLinearOK ? gl.LINEAR : gl.NEAREST);
+      halfFloatLinearOK ? gl.LINEAR : gl.NEAREST
+    );
 
-    gl.texParameteri(gl.TEXTURE_3D,
+    gl.texParameteri(
+      gl.TEXTURE_3D,
       gl.TEXTURE_MAG_FILTER,
-      halfFloatLinearOK ? gl.LINEAR : gl.NEAREST);
+      halfFloatLinearOK ? gl.LINEAR : gl.NEAREST
+    );
 
     gl.texParameteri(gl.TEXTURE_3D, gl.TEXTURE_WRAP_R, gl.CLAMP_TO_EDGE);
     gl.texParameteri(gl.TEXTURE_3D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
     gl.texParameteri(gl.TEXTURE_3D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
 
     gl.texSubImage3D(
-      gl.TEXTURE_3D, 0,
-      0, 0, 0,
-      volDims[0], volDims[1], volDims[2],
-      gl.RED, gl.HALF_FLOAT,
+      gl.TEXTURE_3D,
+      0,
+      0,
+      0,
+      0,
+      volDims[0],
+      volDims[1],
+      volDims[2],
+      gl.RED,
+      gl.HALF_FLOAT,
       vol.dataU16
     );
 
-    var longest = Math.max(volDims[0],
-                    Math.max(volDims[1], volDims[2]));
+    var longest = Math.max(volDims[0], Math.max(volDims[1], volDims[2]));
 
-    var volScale = [
-      volDims[0] / longest,
-      volDims[1] / longest,
-      volDims[2] / longest
-    ];
+    var volScale = [volDims[0] / longest, volDims[1] / longest, volDims[2] / longest];
 
     lastVolumeDims = volDims;
     lastVolumeScale = volScale;
 
-    if (shader.uniforms["volume_dims"])
-      gl.uniform3iv(shader.uniforms["volume_dims"], volDims);
+    if (shader.uniforms["volume_dims"]) gl.uniform3iv(shader.uniforms["volume_dims"], volDims);
 
-    if (shader.uniforms["volume_scale"])
-      gl.uniform3fv(shader.uniforms["volume_scale"], volScale);
+    if (shader.uniforms["volume_scale"]) gl.uniform3fv(shader.uniforms["volume_scale"], volScale);
 
     newVolumeUpload = true;
 
@@ -133,6 +141,31 @@ window.loadDensityFromFirebaseUrl = function (url) {
   });
 };
 
+// ------------------------------
+// Topbar readiness wiring (Option A)
+// ------------------------------
+function bindTopbarControls() {
+  if (_topbarBound) return;
+
+  elToggleBtn = document.getElementById("jobsToggleBtn");
+  if (!elToggleBtn) return; // topbar not injected yet (or missing button)
+
+  elToggleBtn.addEventListener("click", () => {
+    setOpen(!_open);
+  });
+
+  _topbarBound = true;
+}
+
+// Listen for the signal fired after topbar.html is injected
+window.addEventListener("topbar:ready", bindTopbarControls);
+
+// Also attempt immediately in case topbar injected very quickly / already present
+bindTopbarControls();
+
+// ------------------------------
+// UI helpers
+// ------------------------------
 function fmtDate(v) {
   if (!v) return "";
   try {
@@ -161,9 +194,11 @@ function fmtDate(v) {
 function showActions(job) {
   _selectedJob = job ?? null;
 
-  elResultWrap.classList.add("is-open");
-  elResultJson.style.display = "none";
-  elResultJson.textContent = "";
+  if (elResultWrap) elResultWrap.classList.add("is-open");
+  if (elResultJson) {
+    elResultJson.style.display = "none";
+    elResultJson.textContent = "";
+  }
 
   const name = job?.nickname ?? job?.filename ?? job?.id ?? "Job";
   const status = String(job?.status ?? "").toUpperCase();
@@ -181,7 +216,6 @@ function showActions(job) {
 
   if (elActionsHint) elActionsHint.textContent = hintParts.join(" • ");
 
-  // Enable/disable visualize button based on densityRef
   if (elVisualizeBtn) {
     elVisualizeBtn.disabled = !densityPath;
     elVisualizeBtn.title = densityPath ? "" : "No density file available for this job.";
@@ -190,14 +224,17 @@ function showActions(job) {
 
 function hideActions() {
   _selectedJob = null;
-  elResultWrap.classList.remove("is-open");
-  elResultJson.textContent = "";
-  elResultJson.style.display = "none";
+  if (elResultWrap) elResultWrap.classList.remove("is-open");
+  if (elResultJson) {
+    elResultJson.textContent = "";
+    elResultJson.style.display = "none";
+  }
   if (elActionsTitle) elActionsTitle.textContent = "Job";
   if (elActionsHint) elActionsHint.textContent = "";
 }
 
 function showJson(obj) {
+  if (!elResultJson) return;
   elResultJson.style.display = "block";
   elResultJson.textContent = JSON.stringify(obj ?? {}, null, 2);
 }
@@ -279,15 +316,17 @@ function renderJobs(jobs) {
 
   elList.innerHTML = jobs.map(rowHtml).join("");
 
-  // Click anywhere on the item to open actions
   elList.querySelectorAll('.jobs-item[data-action="view"]').forEach((item) => {
     const openActions = () => {
       const id = item.getAttribute("data-id");
       const job = jobs.find((j) => (j.id ?? j.jobId) === id) ?? null;
-      const ref = doc(db, "jobs", id);
-      updateDoc(ref, {
-        needsAttention: 0
-      });
+
+      // mark "seen" (fire-and-forget)
+      try {
+        const ref = doc(db, "jobs", id);
+        updateDoc(ref, { needsAttention: 0 });
+      } catch (_) {}
+
       showActions(job ?? { id });
     };
 
@@ -304,7 +343,6 @@ function renderJobs(jobs) {
     });
   });
 
-  // Cancel button
   elList.querySelectorAll('button[data-action="cancel"]').forEach((b) => {
     b.addEventListener("click", async (e) => {
       e.stopPropagation();
@@ -329,7 +367,7 @@ function startJobsListener() {
   stopJobsListener();
   hideActions();
 
-  if (!_hasLoadedOnce) {
+  if (!_hasLoadedOnce && elList) {
     elList.innerHTML = `<div class="jobs-item">Loading...</div>`;
   }
 
@@ -362,14 +400,13 @@ function startJobsListener() {
       renderJobs(merged);
       _hasLoadedOnce = true;
 
-      // If a selected job is open, keep it updated live
       if (_selectedJob?.id) {
         const updated = merged.find((j) => j.id === _selectedJob.id);
         if (updated) showActions(updated);
       }
     },
     (err) => {
-      if (!_hasLoadedOnce) {
+      if (!_hasLoadedOnce && elList) {
         elList.innerHTML = `<div class="jobs-item">Failed to load jobs: ${
           err?.message || String(err)
         }</div>`;
@@ -381,14 +418,7 @@ function startJobsListener() {
 // ---- Actions: View/Download JSON, Visualize ----
 
 function buildOutputJsonPayload(job) {
-  // Keep your existing priority, but treat it explicitly as "output.json payload"
-  return (
-    job?.result ??
-    job?.partialResult ??
-    job?.upstream ??
-    job ??
-    { id: job?.id }
-  );
+  return job?.result ?? job?.partialResult ?? job?.upstream ?? job ?? { id: job?.id };
 }
 
 function downloadTextFile(filename, text) {
@@ -403,7 +433,6 @@ function downloadTextFile(filename, text) {
   URL.revokeObjectURL(url);
 }
 
-// Hook up buttons once
 if (elViewJsonBtn) {
   elViewJsonBtn.addEventListener("click", () => {
     if (!_selectedJob) return;
@@ -422,29 +451,21 @@ if (elDownloadJsonBtn) {
   });
 }
 
-/**
- * You implement this in your renderer code.
- * Must accept a download URL to the density.bin and then kick off rendering.
- *
- * Example signature:
- *   window.InsightRenderer.loadDensityFromUrl(url, { jobId })
- */
 async function visualizeSelectedJob() {
   if (!_selectedJob) return;
 
   const densityPath = _selectedJob?.densityRef?.path;
   if (!densityPath) return;
+  if (!elVisualizeBtn) return;
 
   elVisualizeBtn.disabled = true;
 
   try {
     const url = await getDownloadURL(storageRef(storage, densityPath));
 
-    // close modal
     window.setViewContext?.(`${_selectedJob?.nickname || _selectedJob?.filename}`);
     setOpen(false);
 
-    // inject volume
     window.loadDensityFromFirebaseUrl(url);
   } catch (err) {
     alert(`Visualize failed: ${err?.message || String(err)}`);
@@ -455,13 +476,7 @@ async function visualizeSelectedJob() {
 
 if (elVisualizeBtn) elVisualizeBtn.addEventListener("click", visualizeSelectedJob);
 
-// ---- Open/close controls ----
-
-if (elToggleBtn) {
-  elToggleBtn.addEventListener("click", () => {
-    setOpen(!_open);
-  });
-}
+// ---- Open/close controls (base HTML elements) ----
 
 if (elCloseBtn) {
   elCloseBtn.addEventListener("click", () => setOpen(false));

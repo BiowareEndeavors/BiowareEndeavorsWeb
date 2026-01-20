@@ -14,6 +14,14 @@ from firebase_admin import firestore
 from firebase_functions import firestore_fn, https_fn
 import logging
 
+import os
+from flask import Flask, send_from_directory, redirect, url_for
+from firebase_functions import https_fn
+
+# Initialize Flask app
+app = Flask(__name__)
+PUBLIC_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'public')
+
 from config import (
     get_request_timeout_s,
     get_runpod_api_key,
@@ -276,3 +284,20 @@ def handle_new_payment(event: firestore_fn.Event[firestore_fn.DocumentSnapshot |
         logging.info("Payment %s applied: +%s cents to user %s", payment_id, amount_cents, uid)
     except Exception as e:
         logging.exception("Error processing payment %s for user %s: %s", payment_id, uid, e)
+
+@app.route("/")
+def index():
+    return send_from_directory(PUBLIC_DIR, "index.html")
+
+@app.route("/auth")
+def auth():
+    return send_from_directory(PUBLIC_DIR, "auth.html")
+
+@app.route("/terms")
+def terms():
+    return send_from_directory(PUBLIC_DIR, "terms.html")
+
+@https_fn.on_request()
+def web_app(req: https_fn.Request) -> https_fn.Response:
+    with app.request_context(req.environ):
+        return app.full_dispatch_request()

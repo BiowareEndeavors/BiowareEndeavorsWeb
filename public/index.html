@@ -316,18 +316,12 @@
   <script src="src/shader-srcs.js"></script>
   <script src="src/volume-raycaster.js"></script>
 
-  <script type="module" src="/src/require-auth.js"></script>
-  <script type="module" src="/src/topbar.js"></script>
-  <script type="module" src="/src/molecule-drop.js"></script>
-  <script type="module" src="/src/submit-modal.js"></script>
-  <script type="module" src="/src/jobs-ui.js"></script>
-  <script type="module" src="/src/jobs-badge.js"></script>
-  <script type="module" src="/src/fundsHandler.js"></script>
-
   <script>
     fetch("/partials/topbar.html")
-      .then(r => r.text())
-      .then(html => {document.getElementById("topbarMount").innerHTML = html;
+    .then(r => r.text())
+    .then(html => {
+      document.getElementById("topbarMount").innerHTML = html;
+      window.dispatchEvent(new Event("topbar:ready"));
     });
 
     function toggleFullscreen() {
@@ -341,6 +335,14 @@
       }
     }
   </script>
+
+  <script type="module" src="/src/require-auth.js"></script>
+  <script type="module" src="/src/topbar.js"></script>
+  <script type="module" src="/src/molecule-drop.js"></script>
+  <script type="module" src="/src/submit-modal.js"></script>
+  <script type="module" src="/src/jobs-ui.js"></script>
+  <script type="module" src="/src/jobs-badge.js"></script>
+  <script type="module" src="/src/fundsHandler.js"></script>
 
   <script>
     // Set a default dropdown selection after your JS populates it

@@ -11,10 +11,33 @@
         "firebase-debug.*.log",
         "*.local"
       ],
-      "runtime": "python313"
+      "runtime": "python313", 
+      "entryPoint": "web_app" 
     }
   ],
   "storage": {
     "rules": "storage.rules"
+  },
+  "hosting": {
+    "public": "public",
+    "ignore": [
+      "firebase.json",
+      "**/.*",
+      "**/node_modules/**"
+    ],
+    "rewrites": [
+      {
+        "source": "/auth",
+        "function": "web_app" 
+      },
+      {
+        "source": "/terms",
+        "function": "web_app"
+      },
+      {
+        "source": "/", 
+        "function": "web_app"
+      }
+    ]
   }
 }
