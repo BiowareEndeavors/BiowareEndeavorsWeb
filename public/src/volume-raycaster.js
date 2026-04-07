@@ -1,8 +1,15 @@
 // ------------------------------
-// Volume renderer (WebGL2) - BIN (FP16) volume support
-// Expects BIN layout:
-//   int32 Nx, int32 Ny, int32 Nz, float32 voxelSize   (16 bytes, little-endian)
-//   followed by Nx*Ny*Nz uint16 (FP16 raw density bits)
+// Volume renderer (WebGL2) - BIN (LOG_R8_UNORM) volume support
+// Expects BIN layout (little-endian, 32-byte header):
+//   int32 Nx, int32 Ny, int32 Nz
+//   float32 voxelSize
+//   uint32 encoding        (1 = LOG_R8_UNORM)
+//   float32 rho_max
+//   float32 log_a
+//   uint32 reserved
+//   followed by Nx*Ny*Nz uint8 (UNORM), where
+//     unit = log(1 + log_a * rho) / log(1 + log_a * rho_max)
+//     stored as u8 = round(255 * clamp(unit,0,1))
 //
 // Starts by loading: assets/density.bin
 // Later, Jobs UI can call: window.loadDensityFromFirebaseUrl(url)
@@ -68,27 +75,29 @@ var colormaps = {
 };
 
 // ---------- render mode + state ----------
-var renderMode = "volume"; // "volume" | "iso"
+var renderMode = "iso"; // "volume" | "iso"
 
 // Adaptive sampling multiplier (ALWAYS ON)
 var samplingRate = 1.0;
+
+// Volume file params (set on load; used to convert iso rho -> unit threshold)
+var volumeParams = {
+  rho_max: 0.02,
+  log_a: 10.0
+};
 
 // UI state (only includes knobs you want user-editable)
 var uiState = {
   // base dt_scale (quality); adaptive sampling multiplies this
   dt_scale: 1.0,
 
-  // volume mapping
-  rho_max: 0.02,
-  log_alpha: 10.0,
-
   // volume alpha shaping
   vol_alpha_lo: 0.05,
   vol_alpha_hi: 0.35,
   opacity_strength: 1.0,
 
-  // iso threshold
-  iso_value: 0.001
+  // iso threshold (RAW density units from your domain)
+  iso_value: 0.05
 };
 
 // track last volume uniforms so shader switches re-apply cleanly
@@ -101,13 +110,22 @@ var renderLoopStarted = false;
 
 // ---------- helpers ----------
 function getEffectiveDtScale() {
-  // user sets base; adaptive sampling increases effective dt_scale to hit frame budget
   return Math.max(0.0001, uiState.dt_scale * samplingRate);
 }
 
-function setText(id, txt) {
-  var el = document.getElementById(id);
-  if (el) el.textContent = txt;
+// RAW rho -> mapped unit [0,1] (matches CUDA packing)
+function rhoToUnit(rho) {
+  rho = Math.max(0.0, rho);
+
+  var rho_max = Math.max(0.0, volumeParams.rho_max || 0.0);
+  var log_a = Math.max(0.0, volumeParams.log_a || 0.0);
+
+  var denom = Math.log(1.0 + log_a * rho_max);
+  if (!(denom > 0.0)) return 0.0;
+
+  var v = Math.log(1.0 + log_a * rho) / denom;
+  if (!isFinite(v)) return 0.0;
+  return Math.max(0.0, Math.min(1.0, v));
 }
 
 // ---- resize support for full-screen canvas ----
@@ -145,14 +163,15 @@ function applyUniformsFromUI() {
   if (shader.uniforms["dt_scale"]) gl.uniform1f(shader.uniforms["dt_scale"], getEffectiveDtScale());
 
   // volume-only uniforms (only present in fragShaderVol)
-  if (shader.uniforms["rho_max"]) gl.uniform1f(shader.uniforms["rho_max"], uiState.rho_max);
-  if (shader.uniforms["log_alpha"]) gl.uniform1f(shader.uniforms["log_alpha"], uiState.log_alpha);
   if (shader.uniforms["uAlphaLo"]) gl.uniform1f(shader.uniforms["uAlphaLo"], uiState.vol_alpha_lo);
   if (shader.uniforms["uAlphaHi"]) gl.uniform1f(shader.uniforms["uAlphaHi"], uiState.vol_alpha_hi);
   if (shader.uniforms["uOpacityStrength"]) gl.uniform1f(shader.uniforms["uOpacityStrength"], uiState.opacity_strength);
 
-  // iso-only uniform (only present in fragShaderIso)
-  if (shader.uniforms["iso_value"]) gl.uniform1f(shader.uniforms["iso_value"], uiState.iso_value);
+  // iso-only uniform (fragShaderIso expects iso threshold in the SAME unit-space as texture samples)
+  if (shader.uniforms["iso_value"]) {
+    var iso_unit = rhoToUnit(uiState.iso_value);
+    gl.uniform1f(shader.uniforms["iso_value"], iso_unit);
+  }
 }
 
 function bindCommonUniformsAfterProgramSwap() {
@@ -184,10 +203,8 @@ function switchRenderMode(mode) {
   shader = new Shader(gl, vertShader, frag);
   shader.use(gl);
 
-  // ensure VAO still bound
   if (vao) gl.bindVertexArray(vao);
 
-  // ensure textures still bound
   if (volumeTexture) {
     gl.activeTexture(gl.TEXTURE0);
     gl.bindTexture(gl.TEXTURE_3D, volumeTexture);
@@ -199,7 +216,6 @@ function switchRenderMode(mode) {
 
   bindCommonUniformsAfterProgramSwap();
 
-  // reset adaptive multiplier on mode switch (keeps it crisp initially)
   samplingRate = 1.0;
   if (shader.uniforms["dt_scale"]) gl.uniform1f(shader.uniforms["dt_scale"], getEffectiveDtScale());
 }
@@ -288,12 +304,10 @@ function initVizUI() {
     // init
     applyValue(Number(s.value), true);
 
-    // slider -> box (always)
     s.addEventListener("input", function () {
       applyValue(Number(s.value), true);
     });
 
-    // box typing behavior:
     n.addEventListener("input", function () {
       var txt = n.value;
       if (txt === "" || txt === "-" || txt === "." || txt === "-.") return;
@@ -321,10 +335,8 @@ function initVizUI() {
     });
   }
 
-  // Map intuitive UI -> internal uiState keys
+  // Only keep bindings that are still used
   bindSliderAndInput("dt_scale", "ui_quality", "ui_quality_in");
-  bindSliderAndInput("rho_max", "ui_density_scale", "ui_density_scale_in");
-  bindSliderAndInput("log_alpha", "ui_log_contrast", "ui_log_contrast_in");
   bindSliderAndInput("vol_alpha_lo", "ui_alpha_start", "ui_alpha_start_in");
   bindSliderAndInput("vol_alpha_hi", "ui_alpha_end", "ui_alpha_end_in");
   bindSliderAndInput("opacity_strength", "ui_opacity", "ui_opacity_in");
@@ -370,8 +382,9 @@ function loadVolumeBinFromUrl(url, onload) {
       return;
     }
 
-    if (dataBuffer.byteLength < 16) {
-      alert("Volume file too small (missing header).");
+    // v2 header is 32 bytes
+    if (dataBuffer.byteLength < 32) {
+      alert("Volume file too small (missing v2 header).");
       return;
     }
 
@@ -380,20 +393,28 @@ function loadVolumeBinFromUrl(url, onload) {
     var Ny = dv.getInt32(4, true);
     var Nz = dv.getInt32(8, true);
     var voxelSize = dv.getFloat32(12, true);
+    var encoding = dv.getUint32(16, true);
+    var rho_max = dv.getFloat32(20, true);
+    var log_a = dv.getFloat32(24, true);
 
     if (!(Nx > 0 && Ny > 0 && Nz > 0)) {
       alert("Invalid volume dims: " + Nx + "x" + Ny + "x" + Nz);
       return;
     }
 
+    if (encoding !== 1) {
+      alert("Unsupported volume encoding: " + encoding);
+      return;
+    }
+
     var voxelCount = Nx * Ny * Nz;
-    var expectedBytes = 16 + voxelCount * 2;
+    var expectedBytes = 32 + voxelCount; // u8 payload
     if (dataBuffer.byteLength < expectedBytes) {
       alert("Volume file too small.");
       return;
     }
 
-    var payload = new Uint16Array(dataBuffer, 16, voxelCount);
+    var payload = new Uint8Array(dataBuffer, 32, voxelCount);
 
     if (loadingProgressText) loadingProgressText.innerHTML = "Loaded Volume";
     if (loadingProgressBar) loadingProgressBar.setAttribute("style", "width: 100%");
@@ -401,7 +422,9 @@ function loadVolumeBinFromUrl(url, onload) {
     onload({
       dims: [Nx, Ny, Nz],
       voxelSize: voxelSize,
-      dataU16: payload
+      rho_max: rho_max,
+      log_a: log_a,
+      dataU8: payload
     });
   };
 
@@ -417,18 +440,21 @@ function uploadVolumeToGPU(vol) {
 
   var volDims = vol.dims;
 
+  // stash params from file for iso conversion
+  volumeParams.rho_max = (typeof vol.rho_max === "number") ? vol.rho_max : volumeParams.rho_max;
+  volumeParams.log_a = (typeof vol.log_a === "number") ? vol.log_a : volumeParams.log_a;
+
   gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1);
 
   var tex = gl.createTexture();
   gl.activeTexture(gl.TEXTURE0);
   gl.bindTexture(gl.TEXTURE_3D, tex);
 
-  gl.texStorage3D(gl.TEXTURE_3D, 1, gl.R16F, volDims[0], volDims[1], volDims[2]);
+  // R8 UNORM (always LINEAR-filterable on WebGL2)
+  gl.texStorage3D(gl.TEXTURE_3D, 1, gl.R8, volDims[0], volDims[1], volDims[2]);
 
-  var halfFloatLinearOK = !!gl.getExtension("OES_texture_half_float_linear");
-
-  gl.texParameteri(gl.TEXTURE_3D, gl.TEXTURE_MIN_FILTER, halfFloatLinearOK ? gl.LINEAR : gl.NEAREST);
-  gl.texParameteri(gl.TEXTURE_3D, gl.TEXTURE_MAG_FILTER, halfFloatLinearOK ? gl.LINEAR : gl.NEAREST);
+  gl.texParameteri(gl.TEXTURE_3D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+  gl.texParameteri(gl.TEXTURE_3D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
 
   gl.texParameteri(gl.TEXTURE_3D, gl.TEXTURE_WRAP_R, gl.CLAMP_TO_EDGE);
   gl.texParameteri(gl.TEXTURE_3D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
@@ -438,8 +464,8 @@ function uploadVolumeToGPU(vol) {
     gl.TEXTURE_3D, 0,
     0, 0, 0,
     volDims[0], volDims[1], volDims[2],
-    gl.RED, gl.HALF_FLOAT,
-    vol.dataU16
+    gl.RED, gl.UNSIGNED_BYTE,
+    vol.dataU8
   );
 
   var longestAxis = Math.max(volDims[0], Math.max(volDims[1], volDims[2]));
@@ -458,6 +484,9 @@ function uploadVolumeToGPU(vol) {
 
   gl.activeTexture(gl.TEXTURE0);
   gl.bindTexture(gl.TEXTURE_3D, volumeTexture);
+
+  // re-apply uniforms since iso_value mapping depends on loaded params
+  applyUniformsFromUI();
 
   if (!renderLoopStarted) {
     renderLoopStarted = true;
@@ -504,7 +533,6 @@ function renderFrame() {
     samplingRate = 1.0;
   }
 
-  // keep dt_scale updated each frame (adaptive)
   if (shader.uniforms["dt_scale"]) gl.uniform1f(shader.uniforms["dt_scale"], getEffectiveDtScale());
 
   projView = mat4.create();
@@ -515,12 +543,10 @@ function renderFrame() {
   if (shader.uniforms["eye_pos"]) gl.uniform3fv(shader.uniforms["eye_pos"], eye);
 
   gl.drawArrays(gl.TRIANGLE_STRIP, 0, cubeStrip.length / 3);
-  gl.finish();
 
   var endTime = performance.now();
   var renderTime = endTime - startTime;
 
-  // adaptive sampling: if frame is slower than target, increase samplingRate (bigger steps)
   var targetSamplingRate = renderTime / targetFrameTime;
 
   if (takeScreenShot) {
@@ -561,17 +587,14 @@ window.onload = function () {
     return;
   }
 
-  // start in volume mode
-  shader = new Shader(gl, vertShader, fragShaderVol);
+  shader = new Shader(gl, vertShader, fragShaderIso);
   shader.use(gl);
 
-  // Setup required OpenGL state
   gl.enable(gl.CULL_FACE);
   gl.cullFace(gl.FRONT);
   gl.disable(gl.BLEND);
   gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
 
-  // Setup VAO/VBO
   vao = gl.createVertexArray();
   gl.bindVertexArray(vao);
 
@@ -582,14 +605,12 @@ window.onload = function () {
   gl.enableVertexAttribArray(0);
   gl.vertexAttribPointer(0, 3, gl.FLOAT, false, 0, 0);
 
-  // Init camera with placeholder bounds; resize() fixes it
   camera = new ArcballCamera(defaultEye, center, up, 2, [1, 1]);
   projView = mat4.create();
 
   resizeCanvasAndViewport();
   window.addEventListener("resize", resizeCanvasAndViewport, { passive: true });
 
-  // Register input
   var controller = new Controller();
   controller.mousemove = function (prev, cur, evt) {
     if (evt.buttons == 1) {
@@ -608,10 +629,8 @@ window.onload = function () {
 
   controller.registerForCanvas(canvas);
 
-  // Wire up HTML UI
   initVizUI();
 
-  // Load default colormap into a persistent texture object
   var colormapImage = new Image();
   colormapImage.onload = function () {
     colormapTex = gl.createTexture();
@@ -620,11 +639,11 @@ window.onload = function () {
 
     gl.texStorage2D(gl.TEXTURE_2D, 1, gl.SRGB8_ALPHA8, 180, 1);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_R, gl.CLAMP_TO_EDGE);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+
     gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, 180, 1, gl.RGBA, gl.UNSIGNED_BYTE, colormapImage);
 
-    // set sampler units + any UI-driven uniforms
     bindCommonUniformsAfterProgramSwap();
 
     // Auto-load assets/density.bin once

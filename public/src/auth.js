@@ -1,8 +1,12 @@
+// /src/auth.js  (updated: Option A "no login until verified")
 import { auth } from "/src/firebase-init.js";
 import {
   createUserWithEmailAndPassword,
   signInWithEmailAndPassword,
-  onAuthStateChanged
+  onAuthStateChanged,
+  sendEmailVerification,
+  signOut,
+  sendPasswordResetEmail
 } from "https://www.gstatic.com/firebasejs/12.8.0/firebase-auth.js";
 
 import { getFunctions, httpsCallable } from "https://www.gstatic.com/firebasejs/12.8.0/firebase-functions.js";
@@ -33,6 +37,10 @@ function clearErrors() {
     const el = qs(iid);
     if (el) el.classList.remove("input-invalid");
   });
+
+  // clear verify panel
+  const vp = qs("verifyPanel");
+  if (vp) vp.classList.add("hidden");
 }
 
 function showBanner(msg) {
@@ -68,6 +76,12 @@ function setBusy(isBusy) {
   btn.disabled = isBusy;
   btn.dataset.prevText = btn.dataset.prevText || btn.textContent;
   btn.textContent = isBusy ? "Please wait..." : btn.dataset.prevText;
+
+  const resend = qs("resendVerifyBtn");
+  if (resend) resend.disabled = isBusy;
+
+  const forgot = qs("forgotBtn");
+  if (forgot) forgot.disabled = isBusy;
 }
 
 // Firebase error -> friendly copy + which fields to mark
@@ -75,7 +89,6 @@ function mapAuthError(err) {
   const code = err?.code || "";
   const msg = err?.message || "Authentication failed.";
 
-  // Default
   let banner = "Unable to sign in. Please try again.";
   let field = null;
 
@@ -126,6 +139,102 @@ function mapAuthError(err) {
   return { banner, field };
 }
 
+// ---- forgot password ----
+function mapResetError(err) {
+  const code = err?.code || "";
+  switch (code) {
+    case "auth/invalid-email":
+      return { banner: "That email address doesn’t look valid.", field: { inputId: "email", hintId: "emailHint", hint: "Enter a valid email." } };
+    case "auth/user-not-found":
+      // For security, don’t confirm whether the account exists.
+      return { banner: "If an account exists for that email, you’ll receive a password reset link shortly.", field: null };
+    case "auth/too-many-requests":
+      return { banner: "Too many requests. Try again in a bit.", field: null };
+    case "auth/network-request-failed":
+      return { banner: "Network error. Check your connection and retry.", field: null };
+    default:
+      return { banner: "Could not send reset email. Please try again.", field: null };
+  }
+}
+
+window.forgotPassword = async function forgotPassword() {
+  if (isSignup) return; // should be hidden in signup mode anyway
+
+  clearErrors();
+  const email = (qs("email")?.value || "").trim();
+  if (!email) {
+    showBanner("Enter your email to reset your password.");
+    markInvalid("email", "emailHint", "Email is required to send a reset link.");
+    shakeCard();
+    return;
+  }
+
+  setBusy(true);
+  try {
+    await sendPasswordResetEmail(auth, email);
+    showBanner("If an account exists for that email, you’ll receive a password reset link shortly.");
+  } catch (err) {
+    const mapped = mapResetError(err);
+    showBanner(mapped.banner);
+    if (mapped.field) markInvalid(mapped.field.inputId, mapped.field.hintId, mapped.field.hint);
+    shakeCard();
+  } finally {
+    setBusy(false);
+  }
+};
+
+// ---- verification gate ----
+function showVerifyPanel(email) {
+  const vp = qs("verifyPanel");
+  if (!vp) return;
+  const ve = qs("verifyEmail");
+  if (ve) ve.textContent = email || "";
+  vp.classList.remove("hidden");
+}
+
+async function enforceVerifiedOrSignOut(user, emailForUI) {
+  if (!user) return false;
+
+  // If unverified, show instructions and sign them out (Option A).
+  if (!user.emailVerified) {
+    showBanner("Please verify your email before logging in. We just sent a verification email.");
+    showVerifyPanel(emailForUI || user.email || "");
+    try { await signOut(auth); } catch (_) {}
+    return false;
+  }
+  return true;
+}
+
+window.resendVerification = async function resendVerification() {
+  clearErrors();
+  const email = (qs("email")?.value || "").trim();
+
+  setBusy(true);
+  try {
+    // User must be signed in to resend via client SDK; we sign them out when unverified.
+    // So we do a quick sign-in using the provided email/password, resend, then sign out again.
+    const pass = qs("password")?.value || "";
+    if (!email || !pass) {
+      showBanner("Enter your email and password, then click resend.");
+      shakeCard();
+      return;
+    }
+
+    const cred = await signInWithEmailAndPassword(auth, email, pass);
+    await sendEmailVerification(cred.user);
+    showBanner("Verification email sent. Check your inbox (and spam).");
+    showVerifyPanel(email);
+    try { await signOut(auth); } catch (_) {}
+  } catch (err) {
+    const mapped = mapAuthError(err);
+    showBanner(mapped.banner);
+    if (mapped.field) markInvalid(mapped.field.inputId, mapped.field.hintId, mapped.field.hint);
+    shakeCard();
+  } finally {
+    setBusy(false);
+  }
+};
+
 // ---- mode toggle ----
 window.toggleMode = function toggleMode() {
   isSignup = !isSignup;
@@ -139,6 +248,8 @@ window.toggleMode = function toggleMode() {
 
   const termsRow = qs("termsRow");
   const termsBox = qs("termsCheckbox");
+
+  const forgotRow = qs("forgotRow");
 
   clearErrors();
 
@@ -155,6 +266,8 @@ window.toggleMode = function toggleMode() {
 
     termsRow.classList.remove("hidden");
     termsBox.required = true;
+
+    if (forgotRow) forgotRow.classList.add("hidden");
   } else {
     title.textContent = "Login";
     btn.textContent = "Login";
@@ -169,6 +282,8 @@ window.toggleMode = function toggleMode() {
     termsRow.classList.add("hidden");
     termsBox.required = false;
     termsBox.checked = false;
+
+    if (forgotRow) forgotRow.classList.remove("hidden");
   }
 };
 
@@ -186,7 +301,6 @@ window.handleSubmit = async function handleSubmit(e) {
   const pass = qs("password").value;
   const confirm = qs("confirmPassword").value;
 
-  // Client-side checks first
   if (!email) {
     showBanner("Email is required.");
     markInvalid("email", "emailHint", "Enter your email.");
@@ -214,24 +328,39 @@ window.handleSubmit = async function handleSubmit(e) {
   setBusy(true);
 
   try {
+    let cred;
+
     if (isSignup) {
-      await createUserWithEmailAndPassword(auth, email, pass);
+      cred = await createUserWithEmailAndPassword(auth, email, pass);
+
+      // Ensure doc exists (fine even before verification)
+      await ensureUserDoc({ email });
+
+      // Send verification email
+      await sendEmailVerification(cred.user);
+
+      // Enforce Option A: sign out + show verify instructions
+      showBanner("Account created. Please verify your email before logging in.");
+      showVerifyPanel(email);
+      try { await signOut(auth); } catch (_) {}
+      return;
     } else {
-      await signInWithEmailAndPassword(auth, email, pass);
+      cred = await signInWithEmailAndPassword(auth, email, pass);
+
+      // Block unverified users (Option A)
+      const ok = await enforceVerifiedOrSignOut(cred.user, email);
+      if (!ok) return;
+
+      // Ensure doc exists for verified users
+      await ensureUserDoc({ email });
+
+      window.location.href = "/";
+      return;
     }
-
-    // Always ensure user doc exists
-    await ensureUserDoc({ email });
-
-    // Redirect AFTER successful auth
-    window.location.href = "/";
-
   } catch (err) {
     const mapped = mapAuthError(err);
     showBanner(mapped.banner);
-    if (mapped.field) {
-      markInvalid(mapped.field.inputId, mapped.field.hintId, mapped.field.hint);
-    }
+    if (mapped.field) markInvalid(mapped.field.inputId, mapped.field.hintId, mapped.field.hint);
     shakeCard();
   } finally {
     setBusy(false);
@@ -248,14 +377,23 @@ function hideAuthPanel() {
   const authSide = document.querySelector(".auth-side");
   if (!authSide) return;
   authSide.classList.remove("auth-visible");
-  // keep it display:none due to base CSS
 }
 
-onAuthStateChanged(auth, (user) => {
-  if (user) {
+onAuthStateChanged(auth, async (user) => {
+  // If verified and logged in, hide auth panel.
+  if (user && user.emailVerified) {
     hideAuthPanel();
-  } else {
-    showAuthPanel();
+    return;
   }
-});
 
+  // If logged in but unverified (e.g., another tab signed in), force sign-out and show verify gate.
+  if (user && !user.emailVerified) {
+    showBanner("Please verify your email before logging in.");
+    showVerifyPanel(user.email || "");
+    try { await signOut(auth); } catch (_) {}
+    showAuthPanel();
+    return;
+  }
+
+  showAuthPanel();
+});

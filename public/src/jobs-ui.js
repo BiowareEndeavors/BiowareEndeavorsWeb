@@ -66,80 +66,9 @@ window.setViewContext = function setViewContext(text) {
   elViewContext.textContent = text || "No molecule loaded";
 };
 
-window.loadDensityFromFirebaseUrl = function (url) {
-  if (!gl || !shader) {
-    alert("Renderer not initialized yet.");
-    return;
-  }
-
-  loadVolumeBinFromUrl(url, function (vol) {
-    var volDims = vol.dims;
-
-    gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1);
-
-    var tex = gl.createTexture();
-    gl.activeTexture(gl.TEXTURE0);
-    gl.bindTexture(gl.TEXTURE_3D, tex);
-
-    gl.texStorage3D(gl.TEXTURE_3D, 1, gl.R16F, volDims[0], volDims[1], volDims[2]);
-
-    var halfFloatLinearOK = !!gl.getExtension("OES_texture_half_float_linear");
-
-    gl.texParameteri(
-      gl.TEXTURE_3D,
-      gl.TEXTURE_MIN_FILTER,
-      halfFloatLinearOK ? gl.LINEAR : gl.NEAREST
-    );
-
-    gl.texParameteri(
-      gl.TEXTURE_3D,
-      gl.TEXTURE_MAG_FILTER,
-      halfFloatLinearOK ? gl.LINEAR : gl.NEAREST
-    );
-
-    gl.texParameteri(gl.TEXTURE_3D, gl.TEXTURE_WRAP_R, gl.CLAMP_TO_EDGE);
-    gl.texParameteri(gl.TEXTURE_3D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
-    gl.texParameteri(gl.TEXTURE_3D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
-
-    gl.texSubImage3D(
-      gl.TEXTURE_3D,
-      0,
-      0,
-      0,
-      0,
-      volDims[0],
-      volDims[1],
-      volDims[2],
-      gl.RED,
-      gl.HALF_FLOAT,
-      vol.dataU16
-    );
-
-    var longest = Math.max(volDims[0], Math.max(volDims[1], volDims[2]));
-
-    var volScale = [volDims[0] / longest, volDims[1] / longest, volDims[2] / longest];
-
-    lastVolumeDims = volDims;
-    lastVolumeScale = volScale;
-
-    if (shader.uniforms["volume_dims"]) gl.uniform3iv(shader.uniforms["volume_dims"], volDims);
-
-    if (shader.uniforms["volume_scale"]) gl.uniform3fv(shader.uniforms["volume_scale"], volScale);
-
-    newVolumeUpload = true;
-
-    if (volumeTexture) gl.deleteTexture(volumeTexture);
-    volumeTexture = tex;
-
-    gl.activeTexture(gl.TEXTURE0);
-    gl.bindTexture(gl.TEXTURE_3D, volumeTexture);
-
-    if (!renderLoopStarted) {
-      renderLoopStarted = true;
-      setInterval(renderFrame, targetFrameTime);
-    }
-  });
-};
+// IMPORTANT:
+// Do NOT define window.loadDensityFromFirebaseUrl here.
+// The renderer (volume-raycaster.js) owns that function now.
 
 // ------------------------------
 // Topbar readiness wiring (Option A)
@@ -465,6 +394,11 @@ async function visualizeSelectedJob() {
 
     window.setViewContext?.(`${_selectedJob?.nickname || _selectedJob?.filename}`);
     setOpen(false);
+
+    if (typeof window.loadDensityFromFirebaseUrl !== "function") {
+      alert("Renderer not initialized yet.");
+      return;
+    }
 
     window.loadDensityFromFirebaseUrl(url);
   } catch (err) {

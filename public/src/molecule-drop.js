@@ -269,3 +269,44 @@ async function handleFile(file) {
     },
   });
 }
+
+
+function _molHelpSetOpen(isOpen){
+  const ov = document.getElementById("molHelpOverlay");
+  if (!ov) return;
+  ov.classList.toggle("molhelp-overlay--open", isOpen);
+  ov.setAttribute("aria-hidden", isOpen ? "false" : "true");
+
+  if (isOpen){
+    // focus close for keyboard users
+    const closeBtn = document.getElementById("molHelpCloseBtn");
+    if (closeBtn) closeBtn.focus();
+  }
+}
+
+function _molHelpInit(){
+  const openBtn  = document.getElementById("molHelpBtn");
+  const closeBtn = document.getElementById("molHelpCloseBtn");
+  const okBtn    = document.getElementById("molHelpOkBtn");
+  const overlay  = document.getElementById("molHelpOverlay");
+
+  if (!openBtn || !overlay) return;
+
+  openBtn.addEventListener("click", () => _molHelpSetOpen(true));
+  if (closeBtn) closeBtn.addEventListener("click", () => _molHelpSetOpen(false));
+  if (okBtn) okBtn.addEventListener("click", () => _molHelpSetOpen(false));
+
+  // click outside modal closes
+  overlay.addEventListener("click", (e) => {
+    if (e.target === overlay) _molHelpSetOpen(false);
+  });
+
+  // escape closes
+  window.addEventListener("keydown", (e) => {
+    if (e.key === "Escape" && overlay.classList.contains("molhelp-overlay--open")){
+      _molHelpSetOpen(false);
+    }
+  });
+}
+
+window.addEventListener("load", _molHelpInit);

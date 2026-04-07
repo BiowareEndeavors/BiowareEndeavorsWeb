@@ -47,6 +47,9 @@
 .hud .fundsbox {
     pointer-events: auto;
 }
+.hud .molhelp-fab {
+    pointer-events: auto;
+}
 
 /* Header */
 .jobs-btn { position: relative; }
@@ -113,11 +116,159 @@
   pointer-events: auto;   /* allow text selection/copy if desired */
 }
 
+/* ===== Molecule Help (unique classes) ===== */
+
+.molhelp-fab{
+  position: absolute;
+  left: 16px;
+  top: 70px;
+  font-size: 12px;
+  width: 24px;
+  height: 24px;
+  border-radius: 999px;
+  border: 1px solid rgba(255,255,255,0.14);
+  background: rgba(0,0,0,0.35);
+  color: rgba(255,255,255,0.92);
+  font-weight: 700;
+  text-align: center;
+  cursor: pointer;
+  z-index: 30; /* above viz panel */
+  backdrop-filter: blur(8px);
+}
+.molhelp-fab:hover{
+  background: rgba(0,0,0,0.5);
+  border-color: rgba(255,255,255,0.22);
+}
+.molhelp-fab:focus{
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(0,255,102,0.18);
+}
+
+.molhelp-overlay{
+  position: fixed;
+  inset: 0;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  padding: 18px;
+  background: rgba(0,0,0,0.55);
+  z-index: 2000;
+}
+.molhelp-overlay.molhelp-overlay--open{ display: flex; }
+
+.molhelp-modal{
+  width: min(860px, 100%);
+  max-height: min(86vh, 900px);
+  overflow: hidden;
+  border-radius: 14px;
+  border: 1px solid rgba(255,255,255,0.10);
+  background: rgba(12,12,12,0.92);
+  box-shadow: 0 16px 50px rgba(0,0,0,0.55);
+  backdrop-filter: blur(12px);
+  display: flex;
+  flex-direction: column;
+}
+
+.molhelp-header{
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 14px;
+  border-bottom: 1px solid rgba(255,255,255,0.08);
+}
+.molhelp-title{
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: 0.2px;
+  color: rgba(255,255,255,0.92);
+}
+.molhelp-close{
+  width: 32px;
+  height: 32px;
+  border-radius: 10px;
+  border: 1px solid rgba(255,255,255,0.10);
+  background: rgba(255,255,255,0.06);
+  color: rgba(255,255,255,0.86);
+  font-size: 20px;
+  line-height: 28px;
+  cursor: pointer;
+}
+.molhelp-close:hover{
+  background: rgba(255,255,255,0.10);
+  border-color: rgba(255,255,255,0.16);
+}
+
+.molhelp-body{
+  padding: 14px;
+  overflow: auto;
+}
+
+.molhelp-section{
+  margin-bottom: 14px;
+  padding: 12px;
+  border-radius: 12px;
+  border: 1px solid rgba(255,255,255,0.08);
+  background: rgba(255,255,255,0.03);
+}
+.molhelp-section__title{
+  font-size: 13px;
+  font-weight: 700;
+  margin-bottom: 8px;
+  color: rgba(255,255,255,0.90);
+}
+.molhelp-text{
+  font-size: 13px;
+  color: rgba(255,255,255,0.78);
+}
+.molhelp-list{
+  margin: 8px 0 0 18px;
+  padding: 0;
+}
+.molhelp-note{
+  margin-top: 8px;
+  font-size: 12px;
+  color: rgba(255,255,255,0.65);
+}
+
+.molhelp-pre{
+  margin: 10px 0 0 0;
+  padding: 10px 12px;
+  border-radius: 12px;
+  border: 1px solid rgba(0,255,102,0.12);
+  background: rgba(0,0,0,0.40);
+  overflow: auto;
+  font-size: 12px;
+}
+.molhelp-code{
+  color: rgba(255,255,255,0.90);
+}
+
+.molhelp-footer{
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  padding: 12px 14px;
+  border-top: 1px solid rgba(255,255,255,0.08);
+}
+.molhelp-btn{
+  padding: 8px 12px;
+  border-radius: 10px;
+  border: 1px solid rgba(255,255,255,0.12);
+  background: rgba(0,255,102,0.14);
+  color: rgba(255,255,255,0.92);
+  font-weight: 700;
+  cursor: pointer;
+}
+.molhelp-btn:hover{
+  background: rgba(0,255,102,0.20);
+  border-color: rgba(0,255,102,0.22);
+}
+
 /* Funds box (top right area, under header) */
 .fundsbox {
     position: absolute;
     right: 18px;
-    top: 86px;
+    top: 70px;
     display: flex;
     align-items: center;
     gap: 10px;

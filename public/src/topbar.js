@@ -1,23 +1,15 @@
-import { auth } from "./firebase-init.js";
-import {
-  onAuthStateChanged,
-  signOut
-} from "https://www.gstatic.com/firebasejs/12.8.0/firebase-auth.js";
+// topbar.js
 
-/* ---------- helpers ---------- */
+import { auth } from "./firebase-init.js";
+import { onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/12.8.0/firebase-auth.js";
 
 function isHomePage() {
-  return (
-    window.location.pathname === "/" ||
-    window.location.pathname === "/index.html"
-  );
+  return window.location.pathname === "/" || window.location.pathname === "/index.html";
 }
 
 function qs(id) {
   return document.getElementById(id);
 }
-
-/* ---------- UI control ---------- */
 
 function updateRouteButtons() {
   const jobsBtn = qs("jobsToggleBtn");
@@ -39,14 +31,12 @@ function updateAuthButtons(user) {
 
   if (user) {
     signOutBtn.classList.remove("hidden");
-    dashboardBtn.classList.remove("hidden");
+    dashboardBtn?.classList.remove("hidden");
   } else {
     signOutBtn.classList.add("hidden");
-    dashboardBtn.classList.add("hidden");
+    dashboardBtn?.classList.add("hidden");
   }
 }
-
-/* ---------- sign out ---------- */
 
 async function handleSignOut() {
   try {
@@ -57,20 +47,22 @@ async function handleSignOut() {
   }
 }
 
-/* ---------- init ---------- */
-
-document.addEventListener("DOMContentLoaded", () => {
-
-  // Wire click handler
+function initTopbarUi() {
   const signOutBtn = qs("signOutBtn");
-  if (signOutBtn) {
+  if (signOutBtn && !signOutBtn.dataset.bound) {
     signOutBtn.addEventListener("click", handleSignOut);
+    signOutBtn.dataset.bound = "1";
   }
 
   updateRouteButtons();
-});
+}
 
-/* ---------- auth listener ---------- */
+// If topbar is already injected, init now; otherwise wait for event.
+if (qs("signOutBtn") || qs("jobsToggleBtn") || qs("fullscreenBtn")) {
+  initTopbarUi();
+} else {
+  window.addEventListener("topbar:ready", initTopbarUi, { once: true });
+}
 
 onAuthStateChanged(auth, (user) => {
   updateAuthButtons(user);

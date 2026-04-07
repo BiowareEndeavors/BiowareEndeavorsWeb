@@ -8,6 +8,7 @@
   <link rel="stylesheet" href="css/all.css">
   <link rel="stylesheet" href="css/auth.css">
   <link rel="stylesheet" href="css/topbar.css">
+  <link rel="stylesheet" href="css/demo-banner.css">
 </head>
 
 <body>
@@ -23,7 +24,7 @@
       </h1>
 
       <p class="subhead">
-        Submit a molecule, run a point solve, and visualize/download densities directly in the web app.
+        Submit a molecule, run a point solve, and visualize electron density directly in the web app.
         Electronic structure will be calculated using our custom built DFT software ran on a cluster of GPUs in the cloud. 
       </p>
 
@@ -41,67 +42,67 @@
             <div class="bench-row">
               <div class="bench-name">Aspirin</div>
               <div class="bench-meta">21 Atoms</div>
-              <div class="bench-time">3.5s</div>
-              <div class="bench-cost">$0.06</div>
+              <div class="bench-time">3.1s</div>
+              <div class="bench-cost">$0.16</div>
             </div>
             <div class="bench-row">
               <div class="bench-name">Caffeine</div>
               <div class="bench-meta">24 Atoms</div>
-              <div class="bench-time">3.9s</div>
-              <div class="bench-cost">$0.06</div>
+              <div class="bench-time">3.1s</div>
+              <div class="bench-cost">$0.15</div>
             </div>
             <div class="bench-row">
               <div class="bench-name">Nicotine</div>
               <div class="bench-meta">26 Atoms</div>
-              <div class="bench-time">4.3s</div>
-              <div class="bench-cost">$0.06</div>
+              <div class="bench-time">3.6s</div>
+              <div class="bench-cost">$0.16</div>
             </div>
             <div class="bench-row">
               <div class="bench-name">Morphine</div>
               <div class="bench-meta">40 Atoms</div>
-              <div class="bench-time">7.3s</div>
-              <div class="bench-cost">$0.09</div>
+              <div class="bench-time">5.2s</div>
+              <div class="bench-cost">$0.16</div>
             </div>
             <div class="bench-row">
               <div class="bench-name">Penicillin</div>
               <div class="bench-meta">41 Atoms</div>
-              <div class="bench-time">10.6s</div>
-              <div class="bench-cost">$0.12</div>
+              <div class="bench-time">6.0s</div>
+              <div class="bench-cost">$0.16</div>
             </div>
             <div class="bench-row">
               <div class="bench-name">Testosterone</div>
               <div class="bench-meta">49 Atoms</div>
-              <div class="bench-time">7.3s</div>
-              <div class="bench-cost">$0.09</div>
+              <div class="bench-time">5.4s</div>
+              <div class="bench-cost">$0.15</div>
             </div>
             <div class="bench-row">
               <div class="bench-name">VitaminD3</div>
               <div class="bench-meta">72 Atoms</div>
-              <div class="bench-time">17.1s</div>
-              <div class="bench-cost">$0.19</div>
+              <div class="bench-time">9.0s</div>
+              <div class="bench-cost">$0.16</div>
             </div>
             <div class="bench-row">
               <div class="bench-name">Remdesivir</div>
               <div class="bench-meta">77 Atoms</div>
-              <div class="bench-time">35.3s</div>
-              <div class="bench-cost">$0.36</div>
+              <div class="bench-time">14.2s</div>
+              <div class="bench-cost">$0.34</div>
             </div>
             <div class="bench-row">
               <div class="bench-name">VitaminK</div>
               <div class="bench-meta">79 Atoms</div>
-              <div class="bench-time">19.6s</div>
-              <div class="bench-cost">$0.20</div>
+              <div class="bench-time">18.5s</div>
+              <div class="bench-cost">$0.31</div>
             </div>
             <div class="bench-row">
               <div class="bench-name">VitaminE</div>
               <div class="bench-meta">81 Atoms</div>
-              <div class="bench-time">34.6s</div>
-              <div class="bench-cost">$0.36</div>
+              <div class="bench-time">11.3s</div>
+              <div class="bench-cost">$0.20</div>
             </div>
           </div>
 
           <div class="fineprint">
-            Metrics will vary depending on hardware assigned to your job.
+            Metrics will vary depending on hardware assigned to your job. H200 GPUs are the fastest, but most expensive hardware available. 
           </div>
         </div>
 
@@ -111,7 +112,6 @@
             <li>Stress tested on systems up to 100 atoms</li>
             <li>Point solves (KS-DFT) using def2-SVP and r2SCAN</li>
             <li>Density visualization (volume + isosurface)</li>
-            <li>Job history + result retrieval (total energy metrics and density grid)</li>
             <li>Web-first workflow</li>
           </ul>
 
@@ -123,7 +123,7 @@
             <li>Linearly scaling computation on large systems</li>
             <li>Forces</li>
             <li>Geometry optimization</li>
-            <li>Better reporting/export (energies, orbitals, etc.)</li>
+            <li>Better reporting/export (energies, orbitals, density grids, etc.)</li>
             <li>ML Accelerated QMMD</li>
             <li>Excited States</li>
           </ul>
@@ -132,6 +132,9 @@
 
       <div class="legal-row">
         <a class="legal-link" href="/terms" target="_blank" rel="noopener noreferrer">Terms and Privacy</a>
+      </div>
+      <div class="legal-row">
+        <p class="legal-link">For questions, contact biowareEndeavors@gmail.com</p>
       </div>
     </section>
 
@@ -159,6 +162,13 @@
             <label for="password">Password</label>
             <input type="password" id="password" required autocomplete="current-password">
             <div class="hint hidden" id="passwordHint"></div>
+          </div>
+
+          <!-- Forgot password (login only) -->
+          <div class="forgot-row" id="forgotRow">
+            <button type="button" class="link-btn forgot-btn" id="forgotBtn" onclick="forgotPassword()">
+              Forgot password?
+            </button>
           </div>
 
           <!-- Sign up only -->
@@ -196,14 +206,17 @@
 
   </div>
 
-  <script type="module" src="/src/auth.js"></script>
-  <script type="module" src="/src/topbar.js"></script>
   <script>
     fetch("/partials/topbar.html")
-      .then(r => r.text())
-      .then(html => {document.getElementById("topbarMount").innerHTML = html;
+    .then(r => r.text())
+    .then(html => {
+      document.getElementById("topbarMount").innerHTML = html;
+      window.dispatchEvent(new Event("topbar:ready"));
     });
   </script>
+  <script type="module" src="/src/demo-banner.js"></script>
+  <script type="module" src="/src/auth.js"></script>
+  <script type="module" src="/src/topbar.js"></script>
 </body>
 
 </html>

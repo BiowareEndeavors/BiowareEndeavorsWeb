@@ -12,6 +12,7 @@
   <link rel="stylesheet" href="css/all.css"> 
   <link rel="stylesheet" href="css/topbar.css"> 
   <link rel="stylesheet" href="css/insight.css">
+  <link rel="stylesheet" href="css/demo-banner.css">
 
   <title>Insight</title>
 
@@ -204,6 +205,120 @@
     </div>
   </div>
 
+  <!-- Help Overlay -->
+  <div id="molHelpOverlay" class="molhelp-overlay" aria-hidden="true">
+    <div class="molhelp-modal" role="dialog" aria-modal="true" aria-label="How to submit a molecule">
+      <div class="molhelp-header">
+        <div class="molhelp-title">How to submit a molecule</div>
+        <button class="molhelp-close" type="button" id="molHelpCloseBtn" title="Close">×</button>
+      </div>
+
+      <div class="molhelp-body">
+        <div class="molhelp-section">
+          <div class="molhelp-section__title">What Insight reads from your XML</div>
+          <div class="molhelp-text">
+            Insight expects an XML file in the same format PubChem provides. Your XML must have:
+            <ul class="molhelp-list">
+              <li><code class="molhelp-code">PC-Atoms_element</code> — atomic number (e.g. 6 for carbon)</li>
+              <li><code class="molhelp-code">PC-Conformer_x</code> — x coordinates (Å)</li>
+              <li><code class="molhelp-code">PC-Conformer_y</code> — y coordinates (Å)</li>
+              <li><code class="molhelp-code">PC-Conformer_z</code> — z coordinates (Å)</li>
+            </ul>
+            If any of these tags are missing, the upload will fail.
+          </div>
+        </div>
+
+        <div class="molhelp-section">
+          <div class="molhelp-section__title">Structure requirements</div>
+          <div class="molhelp-text">
+            <ul class="molhelp-list">
+              <li>Use atomic numbers (not element symbols). Example: O = 8, H = 1, C = 6.</li>
+              <li>Coordinates should be in <b>Angstrom</b>. Insight converts Å → Bohr internally.</li>
+              <li>All four tag lists should have the same length (one entry per atom).</li>
+              <li>Tag order should correspond by index: the i-th <code class="molhelp-code">PC-Element</code> matches the i-th x/y/z.</li>
+            </ul>
+          </div>
+        </div>
+
+        <div class="molhelp-section">
+          <div class="molhelp-section__title">Example XML</div>
+          <div class="molhelp-text">Acetone:</div>
+          <pre class="molhelp-pre"><code class="molhelp-code">
+          &lt;PC-Compounds&gt;
+            &lt;PC-Atoms_element&gt;
+              &lt;PC-Element&gt;8&lt;/PC-Element&gt;
+              &lt;PC-Element&gt;6&lt;/PC-Element&gt;
+              &lt;PC-Element&gt;6&lt;/PC-Element&gt;
+              &lt;PC-Element&gt;6&lt;/PC-Element&gt;
+              &lt;PC-Element&gt;1&lt;/PC-Element&gt;
+              &lt;PC-Element&gt;1&lt;/PC-Element&gt;
+              &lt;PC-Element&gt;1&lt;/PC-Element&gt;
+              &lt;PC-Element&gt;1&lt;/PC-Element&gt;
+              &lt;PC-Element&gt;1&lt;/PC-Element&gt;
+              &lt;PC-Element&gt;1&lt;/PC-Element&gt;
+            &lt;/PC-Atoms_element&gt;
+
+            &lt;PC-Conformer_x&gt;
+              &lt;PC-Conformer_x_E&gt;0.0003&lt;/PC-Conformer_x_E&gt;
+              &lt;PC-Conformer_x_E&gt;0&lt;/PC-Conformer_x_E&gt;
+              &lt;PC-Conformer_x_E&gt;1.281&lt;/PC-Conformer_x_E&gt;
+              &lt;PC-Conformer_x_E&gt;-1.2813&lt;/PC-Conformer_x_E&gt;
+              &lt;PC-Conformer_x_E&gt;1.3279&lt;/PC-Conformer_x_E&gt;
+              &lt;PC-Conformer_x_E&gt;1.326&lt;/PC-Conformer_x_E&gt;
+              &lt;PC-Conformer_x_E&gt;2.1351&lt;/PC-Conformer_x_E&gt;
+              &lt;PC-Conformer_x_E&gt;-2.1352&lt;/PC-Conformer_x_E&gt;
+              &lt;PC-Conformer_x_E&gt;-1.3284&lt;/PC-Conformer_x_E&gt;
+              &lt;PC-Conformer_x_E&gt;-1.3266&lt;/PC-Conformer_x_E&gt;
+            &lt;/PC-Conformer_x&gt;
+
+            &lt;PC-Conformer_y&gt;
+              &lt;PC-Conformer_y_E&gt;-1.3171&lt;/PC-Conformer_y_E&gt;
+              &lt;PC-Conformer_y_E&gt;-0.0872&lt;/PC-Conformer_y_E&gt;
+              &lt;PC-Conformer_y_E&gt;0.7024&lt;/PC-Conformer_y_E&gt;
+              &lt;PC-Conformer_y_E&gt;0.7019&lt;/PC-Conformer_y_E&gt;
+              &lt;PC-Conformer_y_E&gt;1.3235&lt;/PC-Conformer_y_E&gt;
+              &lt;PC-Conformer_y_E&gt;1.3282&lt;/PC-Conformer_y_E&gt;
+              &lt;PC-Conformer_y_E&gt;0.0196&lt;/PC-Conformer_y_E&gt;
+              &lt;PC-Conformer_y_E&gt;0.0187&lt;/PC-Conformer_y_E&gt;
+              &lt;PC-Conformer_y_E&gt;1.323&lt;/PC-Conformer_y_E&gt;
+              &lt;PC-Conformer_y_E&gt;1.3278&lt;/PC-Conformer_y_E&gt;
+            &lt;/PC-Conformer_y&gt;
+
+            &lt;PC-Conformer_z&gt;
+              &lt;PC-Conformer_z_E&gt;-0.0002&lt;/PC-Conformer_z_E&gt;
+              &lt;PC-Conformer_z_E&gt;0.0006&lt;/PC-Conformer_z_E&gt;
+              &lt;PC-Conformer_z_E&gt;-0.0002&lt;/PC-Conformer_z_E&gt;
+              &lt;PC-Conformer_z_E&gt;-0.0002&lt;/PC-Conformer_z_E&gt;
+              &lt;PC-Conformer_z_E&gt;-0.898&lt;/PC-Conformer_z_E&gt;
+              &lt;PC-Conformer_z_E&gt;0.8945&lt;/PC-Conformer_z_E&gt;
+              &lt;PC-Conformer_z_E&gt;0.0027&lt;/PC-Conformer_z_E&gt;
+              &lt;PC-Conformer_z_E&gt;0.0027&lt;/PC-Conformer_z_E&gt;
+              &lt;PC-Conformer_z_E&gt;-0.898&lt;/PC-Conformer_z_E&gt;
+              &lt;PC-Conformer_z_E&gt;0.8945&lt;/PC-Conformer_z_E&gt;
+            &lt;/PC-Conformer_z&gt;
+          &lt;/PC-Compounds&gt;
+          </code></pre>
+
+          <div class="molhelp-note">
+            Note: These 4 required blocks don't have to be direct children of the root.
+          </div>
+        </div>
+
+        <div class="molhelp-section">
+          <div class="molhelp-section__title">How to submit</div>
+          <div class="molhelp-text">
+            Drag-and-drop a <code class="molhelp-code">.xml</code> file anywhere on the page.
+            After it is detected, the Submit Job modal will show filename and atom count.
+          </div>
+        </div>
+      </div>
+
+      <div class="molhelp-footer">
+        <button class="molhelp-btn" type="button" id="molHelpOkBtn">Got it</button>
+      </div>
+    </div>
+  </div>
+
   <div class="stage">
     <canvas id="glcanvas"></canvas>
 
@@ -211,6 +326,9 @@
       <!-- Header -->
       <div id="topbarMount"></div>
 
+      <!-- Submit help button -->
+      <button class="molhelp-fab" type="button" id="molHelpBtn" title="How to submit a molecule" aria-haspopup="dialog">?</button>
+      
       <!-- Funds box -->
       <div class="fundsbox">
         <span class="funds-amount" id="fundsAmount">-</span>
@@ -227,14 +345,15 @@
           <!-- Render mode -->
           <div class="viz-row viz-mode">
             <label class="viz-radio">
-              <input type="radio" name="vizMode" id="vizModeVolume" value="volume" checked />
-              <span>Volume</span>
+              <input type="radio" name="vizMode" id="vizModeIso" value="iso"  checked  />
+              <span>Isosurface</span>
             </label>
 
             <label class="viz-radio">
-              <input type="radio" name="vizMode" id="vizModeIso" value="iso" />
-              <span>Isosurface</span>
+              <input type="radio" name="vizMode" id="vizModeVolume" value="volume"/>
+              <span>Volume</span>
             </label>
+
           </div>
 
           <!-- Volume controls -->
@@ -243,49 +362,33 @@
 
             <div class="viz-control">
               <div class="viz-row">
-                <div class="viz-param">Quality</div>
-                <input class="viz-slider" id="ui_quality" type="range" min="0.25" max="4.0" step="0.01" value="0.5" />
-                <input class="viz-input" id="ui_quality_in" type="number" min="0.25" max="4.0" step="0.01" value="0.5" />
-              </div>
-            </div>
-
-            <div class="viz-control">
-              <div class="viz-row">
-                <div class="viz-param">Density scale</div>
-                <input class="viz-slider" id="ui_density_scale" type="range" min="0.0001" max="0.2" step="0.0001" value="0.02" />
-                <input class="viz-input" id="ui_density_scale_in" type="number" min="0.0001" max="0.2" step="0.0001" value="0.02" />
-              </div>
-            </div>
-
-            <div class="viz-control">
-              <div class="viz-row">
-                <div class="viz-param">Log contrast</div>
-                <input class="viz-slider" id="ui_log_contrast" type="range" min="0.1" max="50.0" step="0.1" value="10.0" />
-                <input class="viz-input" id="ui_log_contrast_in" type="number" min="0.1" max="50.0" step="0.1" value="10.0" />
+                <div class="viz-param">Raycast Step</div>
+                <input class="viz-slider" id="ui_quality" type="range" min="0.25" max="4.0" step="0.01" value="2.0" />
+                <input class="viz-input" id="ui_quality_in" type="number" min="0.25" max="4.0" step="0.01" value="2.0" />
               </div>
             </div>
 
             <div class="viz-control">
               <div class="viz-row">
                 <div class="viz-param">Transparency start</div>
-                <input class="viz-slider" id="ui_alpha_start" type="range" min="0.0" max="1.0" step="0.01" value="0.05" />
-                <input class="viz-input" id="ui_alpha_start_in" type="number" min="0.0" max="1.0" step="0.01" value="0.05" />
+                <input class="viz-slider" id="ui_alpha_start" type="range" min="0.0" max="1.0" step="0.01" value="0.0" />
+                <input class="viz-input" id="ui_alpha_start_in" type="number" min="0.0" max="1.0" step="0.01" value="0.0" />
               </div>
             </div>
 
             <div class="viz-control">
               <div class="viz-row">
                 <div class="viz-param">Transparency end</div>
-                <input class="viz-slider" id="ui_alpha_end" type="range" min="0.0" max="1.0" step="0.01" value="0.35" />
-                <input class="viz-input" id="ui_alpha_end_in" type="number" min="0.0" max="1.0" step="0.01" value="0.35" />
+                <input class="viz-slider" id="ui_alpha_end" type="range" min="0.0" max="1.0" step="0.01" value="0.5" />
+                <input class="viz-input" id="ui_alpha_end_in" type="number" min="0.0" max="1.0" step="0.01" value="0.5" />
               </div>
             </div>
 
             <div class="viz-control">
               <div class="viz-row">
                 <div class="viz-param">Opacity</div>
-                <input class="viz-slider" id="ui_opacity" type="range" min="0.1" max="4.0" step="0.01" value="1.0" />
-                <input class="viz-input" id="ui_opacity_in" type="number" min="0.1" max="4.0" step="0.01" value="1.0" />
+                <input class="viz-slider" id="ui_opacity" type="range" min="0.1" max="4.0" step="0.01" value="0.25" />
+                <input class="viz-input" id="ui_opacity_in" type="number" min="0.1" max="4.0" step="0.01" value="0.25" />
               </div>
             </div>
           </div>
@@ -297,8 +400,8 @@
             <div class="viz-control">
               <div class="viz-row">
                 <div class="viz-param">Isovalue</div>
-                <input class="viz-slider" id="ui_isovalue" type="range" min="0.000001" max="0.1" step="0.000001" value="0.001" />
-                <input class="viz-input" id="ui_isovalue_in" type="number" min="0.000001" max="0.1" step="0.000001" value="0.001" />
+                <input class="viz-slider" id="ui_isovalue" type="range" min="0.0001" max="0.5" step="0.0001" value="0.05" />
+                <input class="viz-input" id="ui_isovalue_in" type="number" min="0.0001" max="0.5" step="0.0001" value="0.05" />
               </div>
             </div>
           </div>
@@ -336,6 +439,7 @@
     }
   </script>
 
+  <script type="module" src="/src/demo-banner.js"></script>
   <script type="module" src="/src/require-auth.js"></script>
   <script type="module" src="/src/topbar.js"></script>
   <script type="module" src="/src/molecule-drop.js"></script>

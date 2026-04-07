@@ -417,6 +417,21 @@ input:focus {
   animation: shake 250ms ease-in-out;
 }
 
+.forgot-row {
+  display: flex;
+  justify-content: flex-start;
+  margin-top: -6px;
+}
+
+.forgot-btn {
+  padding: 0;
+  border: 0;
+  font-size: 12px;
+  background: none;
+  cursor: pointer;
+  font: inherit;
+}
+
 .hidden {
   display: none;
 }

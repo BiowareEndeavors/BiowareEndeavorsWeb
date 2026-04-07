@@ -1,11 +1,6 @@
 // ===============================
-// shader-srcs.js (updated)
-// Changes per your notes:
-//  - Adaptive sampling stays in JS only (no UI needed; nothing shader-side)
-//  - rho_max/log_alpha: ONLY used by Volume shader; Iso uses constants internally
-//  - iso_value range: shader unchanged, but UI slider should go to 0.1 (see note below)
-//  - Iso lighting: headlight (light from camera), so it does NOT “rotate” with object
-//  - Iso shininess/ambient/diffuse/specStrength: constants (no uniforms)
+// shader-srcs.js (LOG_R8_UNORM volume; uses hardware sampling via texture())
+// Texture samples return unit-space in [0,1] directly (already log-mapped in CUDA).
 // ===============================
 
 var vertShader =
@@ -26,23 +21,18 @@ void main(void) {
 }`;
 
 // ------------------------------
-// Volume fragment shader (raymarch)
+// Volume fragment shader (raymarch) - LOG_R8_UNORM (unit-space)
 // ------------------------------
 var fragShaderVol =
 `#version 300 es
 precision highp int;
 precision highp float;
 
-uniform highp sampler3D volume;     // R16F raw density
+uniform highp sampler3D volume;     // R8 UNORM (unit-space [0,1])
 uniform highp sampler2D colormap;   // 180x1
 uniform ivec3 volume_dims;
 uniform float dt_scale;
-
-uniform vec2  screen_dims;          // set every resize
-
-// Volume-only mapping params
-uniform float rho_max;
-uniform float log_alpha;
+uniform vec2  screen_dims;
 
 // UI-exposed volume parameters
 uniform float uAlphaLo;
@@ -80,43 +70,10 @@ float linear_to_srgb(float x) {
     return 1.055 * pow(x, 1.0 / 2.4) - 0.055;
 }
 
-float density_to_unit(float rho) {
-    rho = max(rho, 0.0);
-    float denom = log(1.0 + log_alpha * max(rho_max, 0.0));
-    if (denom <= 0.0) return 0.0;
-    float v = log(1.0 + log_alpha * rho) / denom;
-    return clamp(v, 0.0, 1.0);
-}
-
-// Manual trilinear sample in [0,1]^3 using texelFetch
-float sample_volume_linear(vec3 p) {
+// Sample in [0,1]^3; returned value is already unit-space in [0,1]
+float sample_volume(vec3 p) {
     p = clamp(p, vec3(0.0), vec3(1.0));
-
-    vec3 dims = vec3(volume_dims);
-    vec3 coord = p * (dims - 1.0);
-    ivec3 i0 = ivec3(floor(coord));
-    vec3  f  = fract(coord);
-    ivec3 i1 = min(i0 + ivec3(1), volume_dims - ivec3(1));
-
-    float c000 = texelFetch(volume, ivec3(i0.x, i0.y, i0.z), 0).r;
-    float c100 = texelFetch(volume, ivec3(i1.x, i0.y, i0.z), 0).r;
-    float c010 = texelFetch(volume, ivec3(i0.x, i1.y, i0.z), 0).r;
-    float c110 = texelFetch(volume, ivec3(i1.x, i1.y, i0.z), 0).r;
-
-    float c001 = texelFetch(volume, ivec3(i0.x, i0.y, i1.z), 0).r;
-    float c101 = texelFetch(volume, ivec3(i1.x, i0.y, i1.z), 0).r;
-    float c011 = texelFetch(volume, ivec3(i0.x, i1.y, i1.z), 0).r;
-    float c111 = texelFetch(volume, ivec3(i1.x, i1.y, i1.z), 0).r;
-
-    float c00 = mix(c000, c100, f.x);
-    float c10 = mix(c010, c110, f.x);
-    float c01 = mix(c001, c101, f.x);
-    float c11 = mix(c011, c111, f.x);
-
-    float c0 = mix(c00, c10, f.y);
-    float c1 = mix(c01, c11, f.y);
-
-    return mix(c0, c1, f.z);
+    return texture(volume, p).r;
 }
 
 void main(void) {
@@ -146,16 +103,18 @@ void main(void) {
     if (aHi < aLo) { float tmp = aLo; aLo = aHi; aHi = tmp; }
     float opS = max(uOpacityStrength, 0.0);
 
-    for (float t = t_hit.x; t < t_hit.y; t += dt) {
-        float rho = sample_volume_linear(p);
-        float val = density_to_unit(rho);
+    const int MAX_STEPS = 1024;
+    int steps = 0;
 
+    for (float t = t_hit.x; t < t_hit.y; t += dt) {
+        float val = sample_volume(p);                  // unit-space [0,1]
         vec3 rgb = texture(colormap, vec2(val, 0.5)).rgb;
 
         float a = smoothstep(aLo, aHi, val);
         a *= opS;
         a = clamp(a, 0.0, 1.0);
 
+        // keep your existing opacity correction
         a = 1.0 - pow(1.0 - a, dt_scale);
 
         color.rgb += (1.0 - color.a) * a * rgb;
@@ -164,6 +123,9 @@ void main(void) {
         if (color.a >= 0.99) { color.a = 1.0; break; }
 
         p += ray_dir * dt;
+
+        steps++;
+        if (steps >= MAX_STEPS) break;
     }
 
     color.r = linear_to_srgb(color.r);
@@ -172,21 +134,22 @@ void main(void) {
 }`;
 
 // ------------------------------
-// Isosurface fragment shader (raymarch + crossing + refine + headlight shading)
+// Isosurface fragment shader - LOG_R8_UNORM (unit-space)
+// iso_value is expected to be unit-space threshold in [0,1] (JS converts from RAW rho)
 // ------------------------------
 var fragShaderIso =
 `#version 300 es
 precision highp int;
 precision highp float;
 
-uniform highp sampler3D volume;     // R16F raw density
+uniform highp sampler3D volume;     // R8 UNORM (unit-space [0,1])
 uniform highp sampler2D colormap;
 
 uniform ivec3 volume_dims;
 uniform float dt_scale;
 
 uniform vec2  screen_dims;
-uniform float iso_value;            // RAW density threshold
+uniform float iso_value;            // UNIT-space threshold [0,1]
 
 in vec3 vray_dir;
 flat in vec3 transformed_eye;
@@ -214,55 +177,18 @@ float wang_hash(int seed) {
     return float(seed % 2147483647) / float(2147483647);
 }
 
-// Iso uses constant mapping for colormap (not user-tuned)
-float density_to_unit_iso(float rho) {
-    // pick sane constants (your old defaults)
-    const float RHO_MAX  = 0.02;
-    const float LOG_A    = 10.0;
-
-    rho = max(rho, 0.0);
-    float denom = log(1.0 + LOG_A * max(RHO_MAX, 0.0));
-    if (denom <= 0.0) return 0.0;
-    float v = log(1.0 + LOG_A * rho) / denom;
-    return clamp(v, 0.0, 1.0);
-}
-
-float sample_volume_linear(vec3 p) {
+// Sample in [0,1]^3; returned value is unit-space in [0,1]
+float sample_volume(vec3 p) {
     p = clamp(p, vec3(0.0), vec3(1.0));
-
-    vec3 dims = vec3(volume_dims);
-    vec3 coord = p * (dims - 1.0);
-    ivec3 i0 = ivec3(floor(coord));
-    vec3  f  = fract(coord);
-    ivec3 i1 = min(i0 + ivec3(1), volume_dims - ivec3(1));
-
-    float c000 = texelFetch(volume, ivec3(i0.x, i0.y, i0.z), 0).r;
-    float c100 = texelFetch(volume, ivec3(i1.x, i0.y, i0.z), 0).r;
-    float c010 = texelFetch(volume, ivec3(i0.x, i1.y, i0.z), 0).r;
-    float c110 = texelFetch(volume, ivec3(i1.x, i1.y, i0.z), 0).r;
-
-    float c001 = texelFetch(volume, ivec3(i0.x, i0.y, i1.z), 0).r;
-    float c101 = texelFetch(volume, ivec3(i1.x, i0.y, i1.z), 0).r;
-    float c011 = texelFetch(volume, ivec3(i0.x, i1.y, i1.z), 0).r;
-    float c111 = texelFetch(volume, ivec3(i1.x, i1.y, i1.z), 0).r;
-
-    float c00 = mix(c000, c100, f.x);
-    float c10 = mix(c010, c110, f.x);
-    float c01 = mix(c001, c101, f.x);
-    float c11 = mix(c011, c111, f.x);
-
-    float c0 = mix(c00, c10, f.y);
-    float c1 = mix(c01, c11, f.y);
-
-    return mix(c0, c1, f.z);
+    return texture(volume, p).r;
 }
 
 vec3 normal_from_density(vec3 p) {
     vec3 e = 1.0 / vec3(volume_dims);
 
-    float dx = sample_volume_linear(p + vec3(e.x, 0.0, 0.0)) - sample_volume_linear(p - vec3(e.x, 0.0, 0.0));
-    float dy = sample_volume_linear(p + vec3(0.0, e.y, 0.0)) - sample_volume_linear(p - vec3(0.0, e.y, 0.0));
-    float dz = sample_volume_linear(p + vec3(0.0, 0.0, e.z)) - sample_volume_linear(p - vec3(0.0, 0.0, e.z));
+    float dx = sample_volume(p + vec3(e.x, 0.0, 0.0)) - sample_volume(p - vec3(e.x, 0.0, 0.0));
+    float dy = sample_volume(p + vec3(0.0, e.y, 0.0)) - sample_volume(p - vec3(0.0, e.y, 0.0));
+    float dz = sample_volume(p + vec3(0.0, 0.0, e.z)) - sample_volume(p - vec3(0.0, 0.0, e.z));
 
     vec3 g = vec3(dx, dy, dz);
     float gl = length(g);
@@ -288,16 +214,19 @@ void main(void) {
     float t = t_hit.x;
     vec3 p = transformed_eye + (t + jitter) * ray_dir;
 
-    float prev = sample_volume_linear(p);
+    float prev = sample_volume(p);
     bool hit = false;
 
     float t0 = t;
     float t1 = t;
 
+    const int MAX_STEPS = 2048;
+    int steps = 0;
+
     for (; t < t_hit.y; t += dt) {
         t1 = t;
         vec3 p1 = transformed_eye + (t1 + jitter) * ray_dir;
-        float v1 = sample_volume_linear(p1);
+        float v1 = sample_volume(p1);
 
         if (prev < iso_value && v1 >= iso_value) {
             hit = true;
@@ -306,17 +235,19 @@ void main(void) {
         }
 
         prev = v1;
+
+        steps++;
+        if (steps >= MAX_STEPS) break;
     }
 
     if (!hit) discard;
 
-    // Bisection refine
     float a = t0;
     float b = t1;
     for (int i = 0; i < 8; ++i) {
         float m = 0.5 * (a + b);
         vec3 pm = transformed_eye + (m + jitter) * ray_dir;
-        float vm = sample_volume_linear(pm);
+        float vm = sample_volume(pm);
         if (vm >= iso_value) b = m;
         else                a = m;
     }
@@ -326,14 +257,12 @@ void main(void) {
 
     vec3 N = normal_from_density(phit);
 
-    // Headlight: light comes from camera direction
     vec3 V = normalize(-ray_dir);
     vec3 L = V;
     vec3 H = V;
 
     float diff = max(dot(N, L), 0.0);
 
-    // Constants (no uniforms)
     const float SHININESS      = 48.0;
     const float AMBIENT        = 0.25;
     const float DIFFUSE        = 0.90;
@@ -341,8 +270,7 @@ void main(void) {
 
     float spec = pow(max(dot(N, H), 0.0), SHININESS);
 
-    float rho = sample_volume_linear(phit);
-    float val = density_to_unit_iso(rho);
+    float val = sample_volume(phit); // unit-space for colormap
     vec3 baseColor = texture(colormap, vec2(val, 0.5)).rgb;
 
     vec3 shaded = baseColor * (AMBIENT + DIFFUSE * diff) + vec3(1.0) * (SPEC_STRENGTH * spec);
