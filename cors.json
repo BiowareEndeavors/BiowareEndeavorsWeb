@@ -1,6 +1,6 @@
 [
   {
-    "origin": ["http://localhost:3000", "https://insight-93569.web.app/", "https://insight-93569.firebaseapp.com/", "https://biowareendeavors.com/"],
+    "origin": ["http://localhost:3000","http://localhost:5000", "http://127.0.0.1:5000/", "https://insight-93569.web.app/", "https://insight-93569.firebaseapp.com/", "https://biowareendeavors.com/"],
     "method": ["GET", "PUT", "POST", "DELETE", "HEAD"],
     "maxAgeSeconds": 3600,
     "responseHeader": ["*"]

@@ -9,7 +9,14 @@ from firebase_functions import https_fn
 
 from auth_helpers import require_auth
 from xml_validation import validate_molecule_xml
-from runpod_client import submit_job, get_user_credits_usd, create_job_doc
+from runpod_client import (
+    LEGACY_HARDWARE_TIER,
+    create_job_doc,
+    get_runpod_endpoint_for_tier,
+    get_runpod_job_type_for_mode,
+    get_user_credits_usd,
+    submit_job,
+)
 from firebase_admin import firestore
 from firebase_functions import firestore_fn, https_fn
 import logging
@@ -18,14 +25,63 @@ from firebase_functions import https_fn
 from config import (
     get_request_timeout_s,
     get_runpod_api_key,
-    get_runpod_endpoint,
 )
 initialize_app()
 logging.basicConfig(level=logging.INFO)
 
+SUPPORTED_JOB_MODES = {"point_solve", "geometry_optimization"}
+SUPPORTED_HARDWARE_TIERS = {"budget", "performance"}
+DEFAULT_MAX_RUNTIME_SEC = 30 * 60
+MIN_MAX_RUNTIME_SEC = 60
+MAX_MAX_RUNTIME_SEC = 3 * 60 * 60
+
+
+def normalize_job_mode(raw_mode: Any) -> str:
+    mode = str(raw_mode or "point_solve").strip().lower()
+    if mode not in SUPPORTED_JOB_MODES:
+        raise https_fn.HttpsError(
+            code=https_fn.FunctionsErrorCode.INVALID_ARGUMENT,
+            message=f"Unsupported job mode: {mode}",
+        )
+    return mode
+
+
+def normalize_hardware_tier(raw_tier: Any) -> str:
+    tier = str(raw_tier or "budget").strip().lower()
+    if tier not in SUPPORTED_HARDWARE_TIERS:
+        raise https_fn.HttpsError(
+            code=https_fn.FunctionsErrorCode.INVALID_ARGUMENT,
+            message=f"Unsupported hardware tier: {tier}",
+        )
+    return tier
+
+
+def normalize_max_runtime_sec(raw_value: Any) -> int:
+    if raw_value in (None, ""):
+        return DEFAULT_MAX_RUNTIME_SEC
+
+    try:
+        value = int(raw_value)
+    except (TypeError, ValueError):
+        raise https_fn.HttpsError(
+            code=https_fn.FunctionsErrorCode.INVALID_ARGUMENT,
+            message="max_runtime_sec must be an integer number of seconds.",
+        )
+
+    if value < MIN_MAX_RUNTIME_SEC or value > MAX_MAX_RUNTIME_SEC:
+        raise https_fn.HttpsError(
+            code=https_fn.FunctionsErrorCode.INVALID_ARGUMENT,
+            message=(
+                f"max_runtime_sec must be between {MIN_MAX_RUNTIME_SEC} "
+                f"and {MAX_MAX_RUNTIME_SEC} seconds."
+            ),
+        )
+
+    return value
+
 @https_fn.on_call(
     enforce_app_check=False,
-    secrets=["RUNPOD_API_KEY", "RUNPOD_ENDPOINT"],
+    secrets=["RUNPOD_API_KEY"],
 )
 def submit_molecule(req: https_fn.CallableRequest) -> Any:
     auth_info = require_auth(req)
@@ -46,12 +102,40 @@ def submit_molecule(req: https_fn.CallableRequest) -> Any:
     molecule_xml = data.get("molecule_xml", "")
     nickname = data.get("nickname", "")
     filename = data.get("fileName")
+    mode = normalize_job_mode(data.get("mode"))
+    job_type = get_runpod_job_type_for_mode(mode)
+    hardware_tier = normalize_hardware_tier(data.get("hardware_tier"))
+    max_runtime_sec = normalize_max_runtime_sec(data.get("max_runtime_sec"))
+    runpod_endpoint = get_runpod_endpoint_for_tier(hardware_tier, fallback="budget")
+    logging.info(
+        "submit_molecule routing: mode=%s job_type=%s hardware_tier=%s max_runtime_sec=%s endpoint=%s",
+        mode,
+        job_type,
+        hardware_tier,
+        max_runtime_sec,
+        runpod_endpoint,
+    )
 
     n_atoms = validate_molecule_xml(molecule_xml)
 
-    upstream = submit_job(molecule_xml=molecule_xml, uid=uid)
+    upstream = submit_job(
+        molecule_xml=molecule_xml,
+        uid=uid,
+        mode=mode,
+        hardware_tier=hardware_tier,
+        max_runtime_sec=max_runtime_sec,
+        runpod_endpoint=runpod_endpoint,
+    )
     job_doc_id = create_job_doc(
-        uid=uid, upstream=upstream, filename=filename, nickname=nickname, n_atoms=n_atoms
+        uid=uid,
+        upstream=upstream,
+        filename=filename,
+        nickname=nickname,
+        n_atoms=n_atoms,
+        mode=mode,
+        hardware_tier=hardware_tier,
+        max_runtime_sec=max_runtime_sec,
+        runpod_endpoint=runpod_endpoint,
     )
 
     return {
@@ -59,13 +143,18 @@ def submit_molecule(req: https_fn.CallableRequest) -> Any:
         "uid": uid,
         "nickname": nickname,
         "n_atoms": n_atoms,
+        "mode": mode,
+        "job_type": job_type,
+        "hardware_tier": hardware_tier,
+        "max_runtime_sec": max_runtime_sec,
+        "runpod_endpoint": runpod_endpoint,
         "jobId": job_doc_id,
         "filename": filename,
     }
 
 @https_fn.on_call(
     enforce_app_check=False,
-    secrets=["RUNPOD_API_KEY", "RUNPOD_ENDPOINT"],  # or ENDPOINT_ID if you store that separately
+    secrets=["RUNPOD_API_KEY"],
 )
 def cancel_job(req: https_fn.CallableRequest) -> Any:
     auth_info = require_auth(req)
@@ -101,16 +190,20 @@ def cancel_job(req: https_fn.CallableRequest) -> Any:
         return {"ok": True, "jobId": job_id, "skipped": True, "status": status}
 
     runpod_id = (job.get("runpodId") or job.get("runpodId") or job_id).strip()
-    endpoint_id = get_runpod_endpoint()  # if this is just endpoint id; if it’s a full URL, parse it.
+    hardware_tier = str(job.get("hardwareTier") or LEGACY_HARDWARE_TIER).strip().lower()
 
     api_key = get_runpod_api_key()
-    if not endpoint_id or not api_key:
+    if not api_key:
         raise https_fn.HttpsError(
             code=https_fn.FunctionsErrorCode.FAILED_PRECONDITION,
-            message="Server not configured: RUNPOD_ENDPOINT / RUNPOD_API_KEY missing.",
+            message="Server not configured: RUNPOD_API_KEY missing.",
         )
 
-    url = f"https://api.runpod.ai/v2/18yokgwihr9lxm/cancel/{runpod_id}"
+    endpoint = str(job.get("runpodEndpoint") or "").strip() or get_runpod_endpoint_for_tier(
+        hardware_tier,
+        fallback=LEGACY_HARDWARE_TIER,
+    )
+    url = f"{endpoint.rstrip('/')}/cancel/{runpod_id}"
     headers = {"Authorization": api_key}
 
     try:

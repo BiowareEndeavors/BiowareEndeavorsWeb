@@ -10,8 +10,17 @@ from firebase_admin import firestore
 from config import (
     get_request_timeout_s,
     get_runpod_api_key,
-    get_runpod_endpoint,
 )
+
+RUNPOD_ENDPOINTS = {
+    "budget": "https://api.runpod.ai/v2/997hkd7d6wr8zs",
+    "performance": "https://api.runpod.ai/v2/18yokgwihr9lxm",
+}
+LEGACY_HARDWARE_TIER = "performance"
+RUNPOD_JOB_TYPES = {
+    "point_solve": "single_point",
+    "geometry_optimization": "geometry_optimization",
+}
 
 def get_user_credits_usd(db: firestore.Client, uid: str) -> float:
     """
@@ -65,16 +74,55 @@ def _normalize_status_url(endpoint: str, job_id: str) -> str:
     """
     Status endpoint shape is:
       https://api.runpod.ai/v2/<endpointId>/status/<jobId>
-    If RUNPOD_ENDPOINT includes /run, strip it first.
+    If the configured endpoint includes /run, strip it first.
     """
     e = (endpoint or "").rstrip("/")
     if e.endswith("/run") or e.endswith("/runsync"):
         e = e.rsplit("/", 1)[0]
     return f"{e}/status/{job_id}"
 
-def create_job_doc(uid: str, upstream: Dict[str, Any], filename: str, nickname: str, n_atoms: int) -> str:
+
+def get_runpod_endpoint_for_tier(hardware_tier: str, *, fallback: str = LEGACY_HARDWARE_TIER) -> str:
+    tier = str(hardware_tier or "").strip().lower() or fallback
+    endpoint = RUNPOD_ENDPOINTS.get(tier)
+    if endpoint:
+        return endpoint
+
+    fallback_endpoint = RUNPOD_ENDPOINTS.get(fallback)
+    if fallback_endpoint:
+        return fallback_endpoint
+
+    raise https_fn.HttpsError(
+        code=https_fn.FunctionsErrorCode.FAILED_PRECONDITION,
+        message=f"Unsupported RunPod hardware tier: {tier}",
+    )
+
+
+def get_runpod_job_type_for_mode(mode: str) -> str:
+    normalized_mode = str(mode or "").strip().lower()
+    job_type = RUNPOD_JOB_TYPES.get(normalized_mode)
+    if job_type:
+        return job_type
+
+    raise https_fn.HttpsError(
+        code=https_fn.FunctionsErrorCode.INVALID_ARGUMENT,
+        message=f"Unsupported RunPod job mode: {normalized_mode}",
+    )
+
+def create_job_doc(
+    uid: str,
+    upstream: Dict[str, Any],
+    filename: str,
+    nickname: str,
+    n_atoms: int,
+    mode: str,
+    hardware_tier: str,
+    max_runtime_sec: int,
+    runpod_endpoint: str,
+) -> str:
     db = firestore.client()
     runpod_id = upstream.get("id")
+    job_type = get_runpod_job_type_for_mode(mode)
 
     doc_ref = db.collection("jobs").document(runpod_id)
     doc_ref.set(
@@ -84,6 +132,11 @@ def create_job_doc(uid: str, upstream: Dict[str, Any], filename: str, nickname: 
             "filename": filename,
             "nickname": nickname,
             "nAtoms": n_atoms,
+            "mode": mode,
+            "jobType": job_type,
+            "hardwareTier": hardware_tier,
+            "maxRuntimeSec": max_runtime_sec,
+            "runpodEndpoint": runpod_endpoint,
             "status": "IN_QUEUE",
             "statusPriority": 0,
             "needsAttention": 1,
@@ -94,16 +147,24 @@ def create_job_doc(uid: str, upstream: Dict[str, Any], filename: str, nickname: 
     )
     return doc_ref.id
 
-def submit_job(molecule_xml: str, uid: str) -> Dict[str, Any]:
+def submit_job(
+    molecule_xml: str,
+    uid: str,
+    mode: str,
+    hardware_tier: str,
+    max_runtime_sec: int,
+    runpod_endpoint: str | None = None,
+) -> Dict[str, Any]:
     """
     Submits a RunPod serverless job. Returns RunPod response JSON.
     """
-    endpoint = get_runpod_endpoint()
+    endpoint = runpod_endpoint or get_runpod_endpoint_for_tier(hardware_tier, fallback="budget")
+    job_type = get_runpod_job_type_for_mode(mode)
     api_key = get_runpod_api_key()
-    if not endpoint or not api_key:
+    if not api_key:
         raise https_fn.HttpsError(
             code=https_fn.FunctionsErrorCode.FAILED_PRECONDITION,
-            message="Server not configured: RUNPOD_ENDPOINT / RUNPOD_API_KEY missing.",
+            message="Server not configured: RUNPOD_API_KEY missing.",
         )
 
     run_url = _normalize_run_url(endpoint)
@@ -114,7 +175,17 @@ def submit_job(molecule_xml: str, uid: str) -> Dict[str, Any]:
         "Content-Type": "application/json",
         "Authorization": api_key,
     }
-    payload = {"input": {"molecule_xml": molecule_xml, "uid": uid}}
+    payload = {
+        "input": {
+            "molecule_xml": molecule_xml,
+            "uid": uid,
+            "mode": mode,
+            "jobType": job_type,
+            "job_type": job_type,
+            "hardware_tier": hardware_tier,
+            "max_runtime_sec": max_runtime_sec,
+        }
+    }
 
     try:
         r = requests.post(run_url, json=payload, headers=headers, timeout=timeout_s)
@@ -137,16 +208,16 @@ def submit_job(molecule_xml: str, uid: str) -> Dict[str, Any]:
         return {"raw": (r.text or "")[:2000]}
 
 
-def get_status(job_id: str) -> Dict[str, Any]:
+def get_status(job_id: str, hardware_tier: str | None = None) -> Dict[str, Any]:
     """
     Fetches job status from RunPod by job id. Returns RunPod response JSON.
     """
-    endpoint = get_runpod_endpoint()
+    endpoint = get_runpod_endpoint_for_tier(hardware_tier, fallback=LEGACY_HARDWARE_TIER)
     api_key = get_runpod_api_key()
-    if not endpoint or not api_key:
+    if not api_key:
         raise https_fn.HttpsError(
             code=https_fn.FunctionsErrorCode.FAILED_PRECONDITION,
-            message="Server not configured: RUNPOD_ENDPOINT / RUNPOD_API_KEY missing.",
+            message="Server not configured: RUNPOD_API_KEY missing.",
         )
 
     if not job_id:

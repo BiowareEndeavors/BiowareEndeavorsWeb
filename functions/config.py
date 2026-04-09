@@ -24,12 +24,5 @@ def get_max_xml_chars() -> int:
 def get_request_timeout_s() -> float:
     return float(os.environ.get("REQUEST_TIMEOUT_S", str(DEFAULT_REQUEST_TIMEOUT_S)))
 
-def get_runpod_endpoint() -> str:
-    # Accept either:
-    #   - full run URL: https://api.runpod.ai/v2/<endpointId>/run
-    #   - base URL:     https://api.runpod.ai/v2/<endpointId>
-    # We normalize in runpod_client.py.
-    return os.environ.get("RUNPOD_ENDPOINT", "").strip()
-
 def get_runpod_api_key() -> str:
     return os.environ.get("RUNPOD_API_KEY", "").strip()

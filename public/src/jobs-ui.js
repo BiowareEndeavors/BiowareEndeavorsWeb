@@ -1,4 +1,4 @@
-import { app, db, storage, auth } from "/src/firebase-init.js";
+import { db, storage, auth, app } from "/src/firebase-init.js";
 import { onAuthStateChanged } from "https://www.gstatic.com/firebasejs/12.8.0/firebase-auth.js";
 
 import {
@@ -12,7 +12,11 @@ import {
   doc,
 } from "https://www.gstatic.com/firebasejs/12.8.0/firebase-firestore.js";
 
-import { getFunctions, httpsCallable } from "https://www.gstatic.com/firebasejs/12.8.0/firebase-functions.js";
+import {
+  connectFunctionsEmulator,
+  getFunctions,
+  httpsCallable,
+} from "https://www.gstatic.com/firebasejs/12.8.0/firebase-functions.js";
 
 import {
   ref as storageRef,
@@ -20,7 +24,27 @@ import {
 } from "https://www.gstatic.com/firebasejs/12.8.0/firebase-storage.js";
 
 const FUNCTIONS_REGION = "us-central1";
-const functions = getFunctions(app, FUNCTIONS_REGION);
+const LOCAL_FUNCTIONS_HOST = "127.0.0.1";
+const LOCAL_FUNCTIONS_PORT = 5001;
+let didConnectFunctionsEmulator = false;
+
+function getLocalAwareFunctions(region = FUNCTIONS_REGION) {
+  const functions = getFunctions(app, region);
+  const host = typeof window === "undefined" ? "" : window.location.hostname || "";
+  const isLocalHost = host === "127.0.0.1" || host === "localhost";
+
+  if (isLocalHost && !didConnectFunctionsEmulator) {
+    connectFunctionsEmulator(functions, LOCAL_FUNCTIONS_HOST, LOCAL_FUNCTIONS_PORT);
+    didConnectFunctionsEmulator = true;
+    console.info(
+      `[firebase] Using local Functions emulator at ${LOCAL_FUNCTIONS_HOST}:${LOCAL_FUNCTIONS_PORT} (${region})`
+    );
+  }
+
+  return functions;
+}
+
+const functions = getLocalAwareFunctions(FUNCTIONS_REGION);
 const cancelJobCallable = httpsCallable(functions, "cancel_job");
 
 // Elements that are always in the base HTML (safe to grab now)
@@ -37,7 +61,6 @@ const elResultCloseBtn = document.getElementById("jobResultCloseBtn");
 
 const elActionsTitle = document.getElementById("jobActionsTitle");
 const elActionsHint = document.getElementById("jobActionsHint");
-const elViewJsonBtn = document.getElementById("jobViewJsonBtn");
 const elDownloadJsonBtn = document.getElementById("jobDownloadJsonBtn");
 const elVisualizeBtn = document.getElementById("jobVisualizeBtn");
 const elViewContext = document.getElementById("viewContext");
@@ -120,35 +143,60 @@ function fmtDate(v) {
   });
 }
 
+function getJobDisplayName(job) {
+  return job?.nickname ?? job?.filename ?? job?.id ?? "Job";
+}
+
+function toTitleLabel(value) {
+  return String(value ?? "")
+    .trim()
+    .split(/[_\-\s]+/)
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ");
+}
+
+function getJobTypeLabel(job) {
+  const mode = String(job?.mode ?? "").trim().toLowerCase();
+  if (mode === "point_solve") return "Point Solve";
+  if (mode === "geometry_optimization") return "Geometry Optimization";
+
+  const jobType = String(job?.jobType ?? job?.job_type ?? "").trim().toLowerCase();
+  if (jobType === "single_point") return "Point Solve";
+  if (jobType === "geometry_optimization") return "Geometry Optimization";
+
+  return toTitleLabel(mode || jobType);
+}
+
 function showActions(job) {
   _selectedJob = job ?? null;
 
   if (elResultWrap) elResultWrap.classList.add("is-open");
-  if (elResultJson) {
-    elResultJson.style.display = "none";
-    elResultJson.textContent = "";
-  }
 
-  const name = job?.nickname ?? job?.filename ?? job?.id ?? "Job";
+  const name = getJobDisplayName(job);
   const status = String(job?.status ?? "").toUpperCase();
   const createdAt = fmtDate(job?.createdAt);
+  const jobType = getJobTypeLabel(job);
 
   if (elActionsTitle) {
     elActionsTitle.textContent = `${name} (${status || "UNKNOWN"})`;
   }
 
   const hintParts = [];
+  if (jobType) hintParts.push(`Type: ${jobType}`);
   if (createdAt) hintParts.push(`Created: ${createdAt}`);
 
   const densityPath = job?.densityRef?.path;
   if (!densityPath) hintParts.push("No density grid attached to this job yet.");
 
-  if (elActionsHint) elActionsHint.textContent = hintParts.join(" • ");
+  if (elActionsHint) elActionsHint.textContent = hintParts.join(" | ");
 
   if (elVisualizeBtn) {
     elVisualizeBtn.disabled = !densityPath;
     elVisualizeBtn.title = densityPath ? "" : "No density file available for this job.";
   }
+
+  showJson(buildOutputJsonPayload(job));
 }
 
 function hideActions() {
@@ -164,8 +212,23 @@ function hideActions() {
 
 function showJson(obj) {
   if (!elResultJson) return;
+
+  const nextText = JSON.stringify(obj ?? {}, null, 2);
+  const previousScrollTop = elResultJson.scrollTop;
+  const previousDistanceFromBottom =
+    elResultJson.scrollHeight - elResultJson.clientHeight - elResultJson.scrollTop;
+
   elResultJson.style.display = "block";
-  elResultJson.textContent = JSON.stringify(obj ?? {}, null, 2);
+  if (elResultJson.textContent === nextText) return;
+
+  elResultJson.textContent = nextText;
+
+  if (previousDistanceFromBottom <= 24) {
+    elResultJson.scrollTop = elResultJson.scrollHeight;
+    return;
+  }
+
+  elResultJson.scrollTop = previousScrollTop;
 }
 
 function stopJobsListener() {
@@ -192,10 +255,11 @@ function setOpen(open) {
 }
 
 function rowHtml(job) {
-  const name = job?.nickname ?? job?.filename ?? "";
+  const name = getJobDisplayName(job);
   const id = job?.id ?? job?.jobId ?? "";
   const createdAt = fmtDate(job?.createdAt);
   const status = String(job?.status ?? "").toUpperCase();
+  const jobType = getJobTypeLabel(job);
 
   const cancellable = status === "IN_QUEUE" || status === "IN_PROGRESS";
   const needsAttention = Number(job?.needsAttention) === 1;
@@ -213,6 +277,7 @@ function rowHtml(job) {
       <div class="jobs-item__top">
         <div style="min-width:0;">
           <div class="jobs-item__id">${name}</div>
+          ${jobType ? `<div class="jobs-item__type">${jobType}</div>` : ""}
           <div class="jobs-item__meta">${meta}</div>
         </div>
 
@@ -344,7 +409,7 @@ function startJobsListener() {
   );
 }
 
-// ---- Actions: View/Download JSON, Visualize ----
+// ---- Actions: Download JSON, Visualize ----
 
 function buildOutputJsonPayload(job) {
   return job?.result ?? job?.partialResult ?? job?.upstream ?? job ?? { id: job?.id };
@@ -362,21 +427,13 @@ function downloadTextFile(filename, text) {
   URL.revokeObjectURL(url);
 }
 
-if (elViewJsonBtn) {
-  elViewJsonBtn.addEventListener("click", () => {
-    if (!_selectedJob) return;
-    const payload = buildOutputJsonPayload(_selectedJob);
-    showJson(payload);
-  });
-}
-
 if (elDownloadJsonBtn) {
   elDownloadJsonBtn.addEventListener("click", () => {
     if (!_selectedJob) return;
     const payload = buildOutputJsonPayload(_selectedJob);
     const id = _selectedJob?.id ?? "job";
-    const name = (_selectedJob?.nickname ?? _selectedJob?.filename ?? id).replace(/[^\w.-]+/g, "_");
-    downloadTextFile(`${name}_output.json`, JSON.stringify(payload ?? {}, null, 2));
+    const name = getJobDisplayName(_selectedJob).replace(/[^\w.-]+/g, "_");
+    downloadTextFile(`${name || id}_output.json`, JSON.stringify(payload ?? {}, null, 2));
   });
 }
 

@@ -30,7 +30,7 @@
         <div class="jobs-modal__title">Jobs</div>
 
         <div class="jobs-modal__controls">
-          <button class="jobs-close-x" type="button" id="jobsCloseBtn" title="Close">×</button>
+          <button class="jobs-close-x" type="button" id="jobsCloseBtn" title="Close">&times;</button>
         </div>
       </div>
 
@@ -47,16 +47,13 @@
           <div id="jobActionsBody" class="jobs-actions">
             <div class="jobs-actions__row">
               <button class="btn btn-sm btn-success" type="button" id="jobVisualizeBtn">Visualize</button>
-            </div>
-            <div class="jobs-actions__row">
-              <button class="btn btn-sm btn-primary" type="button" id="jobViewJsonBtn">View output.json</button>
               <button class="btn btn-sm btn-secondary" type="button" id="jobDownloadJsonBtn">Download output.json</button>
             </div>
 
             <div class="jobs-actions__hint" id="jobActionsHint"></div>
 
-            <!-- JSON viewer (toggleable) -->
-            <pre id="jobResultJson" class="jobs-result__pre" style="display:none;"></pre>
+            <div class="jobs-actions__section-title">output.json</div>
+            <pre id="jobResultJson" class="jobs-result__pre"></pre>
           </div>
         </div>
       </div>
@@ -69,27 +66,84 @@
       <div class="jobs-modal__header">
         <div class="jobs-modal__title">Submit Job</div>
         <div class="jobs-modal__controls">
-          <button class="jobs-close-x" type="button" id="submitCloseBtn" title="Close">×</button>
+          <button class="jobs-close-x" type="button" id="submitCloseBtn" title="Close">&times;</button>
         </div>
       </div>
 
       <div class="jobs-modal__body">
+        <div class="submit-tabs-scroller">
+          <div class="submit-tabs" role="tablist" aria-label="Job types">
+            <button
+              class="submit-tab is-active"
+              type="button"
+              id="submitPointSolveTab"
+              data-submit-mode="point_solve"
+              role="tab"
+              aria-selected="true"
+              aria-controls="submitPointSolvePanel"
+            >
+              Point Solve
+            </button>
+
+            <button
+              class="submit-tab"
+              type="button"
+              id="submitGeometryOptimizationTab"
+              data-submit-mode="geometry_optimization"
+              role="tab"
+              aria-selected="false"
+              aria-controls="submitGeometryOptimizationPanel"
+            >
+              Geometry Optimization
+            </button>
+
+            <div class="submit-tab-wrap">
+              <button
+                class="submit-tab submit-tab--disabled"
+                type="button"
+                id="submitMolecularDynamicsTab"
+                role="tab"
+                aria-selected="false"
+                aria-disabled="true"
+                disabled
+              >
+                Molecular Dynamics
+              </button>
+              <span class="submit-tab-note">Coming Soon</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="submit-tab-panels">
+          <section
+            class="submit-tab-panel is-active"
+            id="submitPointSolvePanel"
+            data-submit-panel="point_solve"
+            role="tabpanel"
+            aria-labelledby="submitPointSolveTab"
+          >
+            <div class="submit-mode-panel">
+              <div class="submit-mode-title">Point Solve</div>
+              <div class="submit-hint submit-mode-description">
+                Single-point electronic structure solve using the default Insight settings.
+              </div>
+            </div>
 
         <!-- INPUT -->
         <div class="submit-section-title">Input</div>
 
         <div class="submit-row">
           <div class="submit-label">File</div>
-          <div class="submit-value" id="submitFileName">—</div>
+          <div class="submit-value" id="submitFileName">&mdash;</div>
         </div>
 
         <div class="submit-row">
           <div class="submit-label">Atoms</div>
-          <div class="submit-value" id="submitAtomCount">—</div>
+          <div class="submit-value" id="submitAtomCount">&mdash;</div>
         </div>
 
         <div class="submit-hint" style="margin-bottom:8px;">
-          Pressure tested for systems < 100 atoms. For systems larger than this use at your own risk. 
+          Pressure tested for systems &lt; 100 atoms. For systems larger than this use at your own risk.
         </div>
 
         <!-- SIMULATION DEFAULTS -->
@@ -119,19 +173,226 @@
         <div class="submit-section-title">Job Settings</div>
 
         <div class="submit-row submit-row--stack">
-          <label class="submit-label" for="submitNickname">Nickname</label>
-          <input class="submit-input" id="submitNickname" type="text" autocomplete="off" />
-          <div class="submit-hint">Shown in Jobs list.</div>
+          <label class="submit-label" for="submitPointSolveNickname">Nickname</label>
+          <input
+            class="submit-input"
+            id="submitPointSolveNickname"
+            data-submit-input="nickname"
+            type="text"
+            autocomplete="off"
+          />
+          <div class="submit-hint">Shown in the Jobs list.</div>
         </div>
 
-        <!--
         <div class="submit-row submit-row--stack">
-          <label class="submit-label" for="submitMaxRuntime">Max runtime (minutes)</label>
-          <input class="submit-input" id="submitMaxRuntime" type="number"
-                min="1" max="1440" step="1" />
-          <div class="submit-hint">Job will be cancelled after this limit.</div>
+          <div class="submit-row-head">
+            <div class="submit-label" id="submitPointSolveHardwareLabel">Hardware</div>
+            <div class="submit-row-caption">Choose the GPU tier that best fits your turnaround and budget.</div>
+          </div>
+          <div class="submit-hardware-picker" role="radiogroup" aria-labelledby="submitPointSolveHardwareLabel">
+            <label class="submit-hardware-option" data-submit-hardware-option data-hardware-tier="budget">
+              <input
+                class="submit-hardware-radio"
+                type="radio"
+                name="submitPointSolveHardwareTier"
+                value="budget"
+                data-submit-input="hardwareTier"
+                data-default-value="budget"
+                checked
+              />
+              <span class="submit-hardware-option__content">
+                <span class="submit-hardware-option__top">
+                  <span class="submit-hardware-option__badge">Budget</span>
+                  <span class="submit-hardware-option__price">$0.001-$0.003 / s</span>
+                </span>
+                <span class="submit-hardware-option__gpu">RTX 5090 / RTX 4090</span>
+                <span class="submit-hardware-option__copy">Lower cost GPUs for exploratory runs and lighter workloads.</span>
+              </span>
+            </label>
+
+            <label class="submit-hardware-option" data-submit-hardware-option data-hardware-tier="performance">
+              <input
+                class="submit-hardware-radio"
+                type="radio"
+                name="submitPointSolveHardwareTier"
+                value="performance"
+                data-submit-input="hardwareTier"
+              />
+              <span class="submit-hardware-option__content">
+                <span class="submit-hardware-option__top">
+                  <span class="submit-hardware-option__badge">Performance</span>
+                  <span class="submit-hardware-option__price">$0.005-$0.007 / s</span>
+                </span>
+                <span class="submit-hardware-option__gpu">H200 / H100</span>
+                <span class="submit-hardware-option__copy">Premium GPUs for faster turnaround on denser or more urgent jobs.</span>
+              </span>
+            </label>
+          </div>
         </div>
-        -->
+
+        <div class="submit-row submit-row--stack">
+          <label class="submit-label" for="submitPointSolveMaxRuntime">Max runtime (minutes)</label>
+          <input
+            class="submit-input"
+            id="submitPointSolveMaxRuntime"
+            data-submit-input="maxRuntime"
+            data-default-value="5"
+            type="number"
+            min="1"
+            max="60"
+            step="1"
+          />
+          <div class="submit-runtime-estimate">
+            <span class="submit-runtime-estimate__label">Estimated max cost</span>
+            <span class="submit-runtime-estimate__value" data-submit-bind="maxCost">$0.90</span>
+          </div>
+          <div class="submit-hint">Point solve jobs are cancelled after this limit.</div>
+        </div>
+
+          </section>
+
+          <section
+            class="submit-tab-panel"
+            id="submitGeometryOptimizationPanel"
+            data-submit-panel="geometry_optimization"
+            role="tabpanel"
+            aria-labelledby="submitGeometryOptimizationTab"
+            hidden
+          >
+            <div class="submit-mode-panel">
+              <div class="submit-mode-title">Geometry Optimization</div>
+              <div class="submit-hint submit-mode-description">
+                Relax the molecular geometry before returning the final result with the default Insight settings.
+              </div>
+            </div>
+
+            <div class="submit-section-title">Input</div>
+
+            <div class="submit-row">
+              <div class="submit-label">File</div>
+              <div class="submit-value" data-submit-bind="fileName">-</div>
+            </div>
+
+            <div class="submit-row">
+              <div class="submit-label">Atoms</div>
+              <div class="submit-value" data-submit-bind="atomCount">-</div>
+            </div>
+
+            <div class="submit-hint submit-section-hint">
+              Geometry optimization is best for structures that need relaxation before analysis.
+            </div>
+
+            <div class="submit-section-title">Simulation Defaults</div>
+
+            <div class="submit-row">
+              <div class="submit-label">Basis set</div>
+              <div class="submit-value">def2-SVP</div>
+            </div>
+
+            <div class="submit-row">
+              <div class="submit-label">Functional</div>
+              <div class="submit-value">r2SCAN</div>
+            </div>
+
+            <div class="submit-row">
+              <div class="submit-label">Optimizer</div>
+              <div class="submit-value">L-BFGS</div>
+            </div>
+
+            <div class="submit-row">
+              <div class="submit-label">Geometry convergence</div>
+              <div class="submit-value">Tight</div>
+            </div>
+
+            <div class="submit-row">
+              <div class="submit-label">SCF tolerance</div>
+              <div class="submit-value">1e-4</div>
+            </div>
+
+            <div class="submit-hint submit-section-hint">
+              Optimization defaults are fixed for now so geometry jobs stay predictable.
+            </div>
+
+            <div class="submit-section-title">Job Settings</div>
+
+            <div class="submit-row submit-row--stack">
+              <label class="submit-label" for="submitGeometryOptimizationNickname">Nickname</label>
+              <input
+            class="submit-input"
+            id="submitGeometryOptimizationNickname"
+            data-submit-input="nickname"
+            type="text"
+            autocomplete="off"
+          />
+          <div class="submit-hint">Give optimized runs a unique name so they are easy to spot later.</div>
+        </div>
+
+        <div class="submit-row submit-row--stack">
+          <div class="submit-row-head">
+            <div class="submit-label" id="submitGeometryOptimizationHardwareLabel">Hardware</div>
+            <div class="submit-row-caption">Geometry relaxations can take longer, so hardware choice matters more here.</div>
+          </div>
+          <div class="submit-hardware-picker" role="radiogroup" aria-labelledby="submitGeometryOptimizationHardwareLabel">
+            <label class="submit-hardware-option" data-submit-hardware-option data-hardware-tier="budget">
+              <input
+                class="submit-hardware-radio"
+                type="radio"
+                name="submitGeometryOptimizationHardwareTier"
+                value="budget"
+                data-submit-input="hardwareTier"
+                data-default-value="budget"
+                checked
+              />
+              <span class="submit-hardware-option__content">
+                <span class="submit-hardware-option__top">
+                  <span class="submit-hardware-option__badge">Budget</span>
+                  <span class="submit-hardware-option__price">$0.001-$0.003 / s</span>
+                </span>
+                <span class="submit-hardware-option__gpu">RTX 5090 / RTX 4090</span>
+                <span class="submit-hardware-option__copy">A good fit for iterative optimizations when cost control comes first.</span>
+              </span>
+            </label>
+
+            <label class="submit-hardware-option" data-submit-hardware-option data-hardware-tier="performance">
+              <input
+                class="submit-hardware-radio"
+                type="radio"
+                name="submitGeometryOptimizationHardwareTier"
+                value="performance"
+                data-submit-input="hardwareTier"
+              />
+              <span class="submit-hardware-option__content">
+                <span class="submit-hardware-option__top">
+                  <span class="submit-hardware-option__badge">Performance</span>
+                  <span class="submit-hardware-option__price">$0.005-$0.007 / s</span>
+                </span>
+                <span class="submit-hardware-option__gpu">H200 / H100</span>
+                <span class="submit-hardware-option__copy">Best when you want optimization results back quickly on heavier systems.</span>
+              </span>
+            </label>
+          </div>
+        </div>
+
+        <div class="submit-row submit-row--stack">
+          <label class="submit-label" for="submitGeometryOptimizationMaxRuntime">Max runtime (minutes)</label>
+          <input
+            class="submit-input"
+            id="submitGeometryOptimizationMaxRuntime"
+                data-submit-input="maxRuntime"
+                data-default-value="10"
+                type="number"
+                min="1"
+                max="180"
+                step="1"
+              />
+              <div class="submit-runtime-estimate">
+                <span class="submit-runtime-estimate__label">Estimated max cost</span>
+                <span class="submit-runtime-estimate__value" data-submit-bind="maxCost">$1.80</span>
+              </div>
+              <div class="submit-hint">Optimization jobs usually need more time than point solves.</div>
+            </div>
+          </section>
+        </div>
 
         <div class="submit-error" id="submitError" role="alert"></div>
 
@@ -139,12 +400,7 @@
 
 
       <div class="jobs-modal__footer submit-footer">
-        <button class="btn btn-sm btn-secondary" type="button" id="submitPointSolveBtn">Point Solve</button>
-
-        <span class="submit-tooltip-wrap">
-          <button class="btn btn-sm btn-secondary" type="button" id="submitOptimizeBtn" disabled>Optimize Geometry</button>
-          <span class="submit-tooltip">Coming soon</span>
-        </span>
+        <button class="btn btn-sm btn-primary" type="button" id="submitJobBtn">Submit Point Solve</button>
       </div>
     </div>
   </div>

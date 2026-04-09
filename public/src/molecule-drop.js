@@ -9,15 +9,22 @@
 //
 // Uses existing Firebase app/auth from /src/firebase-init.js
 
-import { app, auth } from "/src/firebase-init.js";
+import { auth, app } from "/src/firebase-init.js";
 import { onAuthStateChanged } from "https://www.gstatic.com/firebasejs/12.8.0/firebase-auth.js";
-import { getFunctions, httpsCallable, connectFunctionsEmulator } from "https://www.gstatic.com/firebasejs/12.8.0/firebase-functions.js";
+import {
+  connectFunctionsEmulator,
+  getFunctions,
+  httpsCallable,
+} from "https://www.gstatic.com/firebasejs/12.8.0/firebase-functions.js";
 
 // -----------------------------
 // Config
 // -----------------------------
 const FUNCTIONS_REGION = "us-central1";
 const FUNCTION_NAME = "submit_molecule";
+const LOCAL_FUNCTIONS_HOST = "127.0.0.1";
+const LOCAL_FUNCTIONS_PORT = 5001;
+let didConnectFunctionsEmulator = false;
 
 // Required structure (client-side preflight only; server is source of truth)
 const REQUIRED = [
@@ -200,16 +207,30 @@ function isXmlFile(file) {
 // -----------------------------
 // Firebase callable
 // -----------------------------
-const functions = getFunctions(app, FUNCTIONS_REGION);
+function getLocalAwareFunctions(region = FUNCTIONS_REGION) {
+  const functions = getFunctions(app, region);
+  const host = typeof window === "undefined" ? "" : window.location.hostname || "";
+  const isLocalHost = host === "127.0.0.1" || host === "localhost";
+
+  if (isLocalHost && !didConnectFunctionsEmulator) {
+    connectFunctionsEmulator(functions, LOCAL_FUNCTIONS_HOST, LOCAL_FUNCTIONS_PORT);
+    didConnectFunctionsEmulator = true;
+    console.info(
+      `[firebase] Using local Functions emulator at ${LOCAL_FUNCTIONS_HOST}:${LOCAL_FUNCTIONS_PORT} (${region})`
+    );
+  }
+
+  return functions;
+}
+
+const functions = getLocalAwareFunctions(FUNCTIONS_REGION);
 
 if (auth.currentUser) console.log("uid:", auth.currentUser.uid);
 const submitCallable = httpsCallable(functions, FUNCTION_NAME);
 
 async function submitMolecule(moleculeXml, fileName, extra = {}) {
   const user = await waitForAuthReady();
-  if (!user) throw new Error("Unauthenticated (no user).");
-
-  await user.getIdToken();
+  if (!user) throw new Error("Your session expired. Please sign in again.");
 
   const payload = {
     molecule_xml: moleculeXml,
@@ -217,8 +238,29 @@ async function submitMolecule(moleculeXml, fileName, extra = {}) {
     ...extra, // e.g. nickname, max_runtime_sec, mode
   };
 
-  const res = await submitCallable(payload);
-  return res?.data ?? res;
+  try {
+    await user.getIdToken(true);
+  } catch (_) {
+    throw new Error("Your session expired. Please sign in again.");
+  }
+
+  try {
+    const res = await submitCallable(payload);
+    return res?.data ?? res;
+  } catch (err) {
+    if (String(err?.code || "") === "functions/unauthenticated") {
+      try {
+        await user.getIdToken(true);
+      } catch (_) {
+        throw new Error("Your session expired. Please sign in again.");
+      }
+
+      const retryRes = await submitCallable(payload);
+      return retryRes?.data ?? retryRes;
+    }
+
+    throw err;
+  }
 }
 
 
@@ -256,14 +298,16 @@ async function handleFile(file) {
     fileName: file.name,
     nAtoms: extracted.nAtoms,
     moleculeXml: extracted.moleculeXml,
-    onSubmit: async ({ mode, nickname, max_runtime_sec, moleculeXml, fileName }) => {
+    onSubmit: async ({ mode, nickname, hardware_tier, max_runtime_sec, moleculeXml, fileName }) => {
       setStatus("Submitting...");
       const data = await submitMolecule(moleculeXml, fileName, {
         mode,
         nickname,
+        hardware_tier,
         max_runtime_sec,
       });
       console.log("submit_molecule response:", data);
+      console.log("submit_molecule selected endpoint:", data?.runpod_endpoint);
       window.lastMoleculeSubmitResponse = data;
       setStatus("Submitted successfully.");
     },

@@ -1,0 +1,107 @@
+.demo-banner-region {
+  position: fixed;
+  top: var(--demo-banner-top, calc(env(safe-area-inset-top, 0px) + 76px));
+  left: 50%;
+  transform: translateX(-50%);
+  width: min(440px, calc(100vw - 24px));
+  z-index: 1600;
+  pointer-events: none;
+}
+
+.demo-banner {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  width: 100%;
+  padding: 14px 16px;
+  border-radius: 16px;
+  background: linear-gradient(180deg, rgba(12, 12, 12, 0.96), rgba(18, 18, 18, 0.9));
+  border: 1px solid rgba(0, 255, 102, 0.24);
+  box-shadow:
+    0 18px 40px rgba(0, 0, 0, 0.42),
+    0 0 0 1px rgba(255, 255, 255, 0.05) inset;
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  color: rgba(245, 245, 245, 0.94);
+  font-size: 14px;
+  font-weight: 500;
+  line-height: 1.4;
+  pointer-events: auto;
+  animation: demoBannerSlideIn 480ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.demo-banner__text {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.demo-banner__link {
+  color: var(--accent);
+  font-weight: 700;
+  text-decoration: none;
+  text-underline-offset: 2px;
+}
+
+.demo-banner__link:hover {
+  text-decoration: underline;
+}
+
+.demo-banner__close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.06);
+  color: rgba(245, 245, 245, 0.92);
+  font-size: 15px;
+  font-weight: 700;
+  line-height: 1;
+  cursor: pointer;
+  transition: background 140ms ease, border-color 140ms ease, transform 140ms ease;
+}
+
+.demo-banner__close:hover {
+  background: rgba(255, 255, 255, 0.12);
+  border-color: rgba(0, 255, 102, 0.26);
+  transform: translateY(-1px);
+}
+
+.demo-banner__close:focus-visible {
+  outline: 2px solid rgba(0, 255, 102, 0.65);
+  outline-offset: 2px;
+}
+
+@keyframes demoBannerSlideIn {
+  from {
+    opacity: 0;
+    transform: translateY(-14px) scale(0.97);
+  }
+
+  70% {
+    opacity: 1;
+    transform: translateY(2px) scale(1);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@media (max-width: 520px) {
+  .demo-banner-region {
+    top: var(--demo-banner-top, calc(env(safe-area-inset-top, 0px) + 86px));
+    width: calc(100vw - 20px);
+  }
+
+  .demo-banner {
+    gap: 12px;
+    padding: 12px 13px;
+    font-size: 13px;
+  }
+}
