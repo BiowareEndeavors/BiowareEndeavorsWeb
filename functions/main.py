@@ -16,6 +16,7 @@ from runpod_client import (
     get_runpod_job_type_for_mode,
     get_user_credits_usd,
     submit_job,
+    upload_job_input_xml,
 )
 from firebase_admin import firestore
 from firebase_functions import firestore_fn, https_fn
@@ -126,6 +127,16 @@ def submit_molecule(req: https_fn.CallableRequest) -> Any:
         max_runtime_sec=max_runtime_sec,
         runpod_endpoint=runpod_endpoint,
     )
+    input_xml_path = ""
+    try:
+        runpod_id = str(upstream.get("id") or "").strip()
+        if runpod_id:
+            input_xml_path = upload_job_input_xml(runpod_id, molecule_xml)
+        else:
+            logging.warning("RunPod response missing job id; input XML was not uploaded. upstream=%s", upstream)
+    except Exception as e:
+        logging.exception("Failed to upload input XML for submitted job: %s", e)
+
     job_doc_id = create_job_doc(
         uid=uid,
         upstream=upstream,
@@ -136,6 +147,7 @@ def submit_molecule(req: https_fn.CallableRequest) -> Any:
         hardware_tier=hardware_tier,
         max_runtime_sec=max_runtime_sec,
         runpod_endpoint=runpod_endpoint,
+        input_xml_path=input_xml_path,
     )
 
     return {

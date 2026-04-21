@@ -20,6 +20,7 @@ import {
 
 import {
   ref as storageRef,
+  getBytes,
   getDownloadURL,
 } from "https://www.gstatic.com/firebasejs/12.8.0/firebase-storage.js";
 
@@ -61,9 +62,12 @@ const elResultCloseBtn = document.getElementById("jobResultCloseBtn");
 
 const elActionsTitle = document.getElementById("jobActionsTitle");
 const elActionsHint = document.getElementById("jobActionsHint");
+const elDownloadInputXmlBtn = document.getElementById("jobDownloadInputXmlBtn");
 const elDownloadJsonBtn = document.getElementById("jobDownloadJsonBtn");
+const elDownloadOptimizedXmlBtn = document.getElementById("jobDownloadOptimizedXmlBtn");
 const elVisualizeBtn = document.getElementById("jobVisualizeBtn");
 const elViewContext = document.getElementById("viewContext");
+const MAX_INPUT_XML_DOWNLOAD_BYTES = 5 * 1024 * 1024;
 
 // Elements that live inside topbar.html (NOT safe to grab until topbar injected)
 let elToggleBtn = null;
@@ -168,15 +172,27 @@ function getJobTypeLabel(job) {
   return toTitleLabel(mode || jobType);
 }
 
+function isGeometryOptimizationJob(job) {
+  const mode = String(job?.mode ?? "").trim().toLowerCase();
+  if (mode === "geometry_optimization") return true;
+
+  const jobType = String(job?.jobType ?? job?.job_type ?? "").trim().toLowerCase();
+  return jobType === "geometry_optimization";
+}
+
 function showActions(job) {
   _selectedJob = job ?? null;
 
   if (elResultWrap) elResultWrap.classList.add("is-open");
 
+  const payload = buildOutputJsonPayload(job);
   const name = getJobDisplayName(job);
   const status = String(job?.status ?? "").toUpperCase();
   const createdAt = fmtDate(job?.createdAt);
   const jobType = getJobTypeLabel(job);
+  const isGeometryOptimization = isGeometryOptimizationJob(job);
+  const inputXmlPath = getInputXmlPath(job);
+  const inputXmlInline = getInputXmlText(job);
 
   if (elActionsTitle) {
     elActionsTitle.textContent = `${name} (${status || "UNKNOWN"})`;
@@ -187,6 +203,7 @@ function showActions(job) {
   if (createdAt) hintParts.push(`Created: ${createdAt}`);
 
   const densityPath = job?.densityRef?.path;
+  const optimizedGeometryXml = getOptimizedGeometryXml(job);
   if (!densityPath) hintParts.push("No density grid attached to this job yet.");
 
   if (elActionsHint) elActionsHint.textContent = hintParts.join(" | ");
@@ -196,7 +213,25 @@ function showActions(job) {
     elVisualizeBtn.title = densityPath ? "" : "No density file available for this job.";
   }
 
-  showJson(buildOutputJsonPayload(job));
+  if (elDownloadInputXmlBtn) {
+    const hasInputXml = Boolean(inputXmlPath || inputXmlInline);
+    elDownloadInputXmlBtn.disabled = !hasInputXml;
+    elDownloadInputXmlBtn.title = hasInputXml
+      ? ""
+      : "Input XML isn't stored for this job.";
+  }
+
+  if (elDownloadOptimizedXmlBtn) {
+    elDownloadOptimizedXmlBtn.hidden = !isGeometryOptimization;
+    elDownloadOptimizedXmlBtn.disabled = !isGeometryOptimization || !optimizedGeometryXml;
+    elDownloadOptimizedXmlBtn.title = !isGeometryOptimization
+      ? "Only available for geometry optimization jobs."
+      : optimizedGeometryXml
+        ? ""
+        : "No optimized geometry XML available for this job yet.";
+  }
+
+  showJson(payload);
 }
 
 function hideActions() {
@@ -208,6 +243,15 @@ function hideActions() {
   }
   if (elActionsTitle) elActionsTitle.textContent = "Job";
   if (elActionsHint) elActionsHint.textContent = "";
+  if (elDownloadInputXmlBtn) {
+    elDownloadInputXmlBtn.disabled = true;
+    elDownloadInputXmlBtn.title = "Input XML isn't stored for this job.";
+  }
+  if (elDownloadOptimizedXmlBtn) {
+    elDownloadOptimizedXmlBtn.hidden = true;
+    elDownloadOptimizedXmlBtn.disabled = true;
+    elDownloadOptimizedXmlBtn.title = "No optimized geometry XML available for this job yet.";
+  }
 }
 
 function showJson(obj) {
@@ -415,8 +459,115 @@ function buildOutputJsonPayload(job) {
   return job?.result ?? job?.partialResult ?? job?.upstream ?? job ?? { id: job?.id };
 }
 
-function downloadTextFile(filename, text) {
-  const blob = new Blob([text], { type: "application/json;charset=utf-8" });
+function getInputXmlPath(job) {
+  const directCandidates = [
+    job?.inputXmlRef?.path,
+    job?.input_xml_ref?.path,
+    job?.inputXmlPath,
+    job?.input_xml_path,
+  ];
+
+  for (const candidate of directCandidates) {
+    if (typeof candidate === "string" && candidate.trim()) {
+      return candidate;
+    }
+  }
+
+  return "";
+}
+
+function findNestedStringValueByKey(root, targetKey) {
+  if (!root || typeof root !== "object") return "";
+
+  const seen = new Set();
+  const stack = [root];
+  let visitedCount = 0;
+
+  while (stack.length > 0 && visitedCount < 500) {
+    const current = stack.pop();
+    if (!current || typeof current !== "object" || seen.has(current)) continue;
+
+    seen.add(current);
+    visitedCount += 1;
+
+    const directValue = current?.[targetKey];
+    if (typeof directValue === "string" && directValue.trim()) {
+      return directValue;
+    }
+
+    if (Array.isArray(current)) {
+      for (let i = current.length - 1; i >= 0; i -= 1) {
+        stack.push(current[i]);
+      }
+      continue;
+    }
+
+    for (const value of Object.values(current)) {
+      stack.push(value);
+    }
+  }
+
+  return "";
+}
+
+function getInputXmlText(job) {
+  const payload = buildOutputJsonPayload(job);
+  const directCandidates = [
+    job?.molecule_xml,
+    job?.moleculeXml,
+    job?.input_xml,
+    job?.inputXml,
+    payload?.molecule_xml,
+    payload?.moleculeXml,
+    payload?.input_xml,
+    payload?.inputXml,
+  ];
+
+  for (const candidate of directCandidates) {
+    if (typeof candidate === "string" && candidate.trim()) {
+      return candidate;
+    }
+  }
+
+  return (
+    findNestedStringValueByKey(payload, "molecule_xml") ||
+    findNestedStringValueByKey(payload, "moleculeXml") ||
+    findNestedStringValueByKey(payload, "input_xml") ||
+    findNestedStringValueByKey(payload, "inputXml") ||
+    findNestedStringValueByKey(job, "molecule_xml") ||
+    findNestedStringValueByKey(job, "moleculeXml") ||
+    findNestedStringValueByKey(job, "input_xml") ||
+    findNestedStringValueByKey(job, "inputXml")
+  );
+}
+
+function getOptimizedGeometryXml(job) {
+  const payload = buildOutputJsonPayload(job);
+  const directCandidates = [
+    job?.optimized_geometry_xml,
+    job?.optimizedGeometryXml,
+    payload?.optimized_geometry_xml,
+    payload?.optimizedGeometryXml,
+    payload?.output?.optimized_geometry_xml,
+    payload?.output?.optimizedGeometryXml,
+  ];
+
+  for (const candidate of directCandidates) {
+    if (typeof candidate === "string" && candidate.trim()) {
+      return candidate;
+    }
+  }
+
+  return (
+    findNestedStringValueByKey(payload, "optimized_geometry_xml") ||
+    findNestedStringValueByKey(payload, "optimizedGeometryXml") ||
+    findNestedStringValueByKey(job, "optimized_geometry_xml") ||
+    findNestedStringValueByKey(job, "optimizedGeometryXml")
+  );
+}
+
+function downloadTextFile(filename, text, mimeType = "application/json;charset=utf-8") {
+  const blob = new Blob([text], { type: mimeType });
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = url;
@@ -434,6 +585,65 @@ if (elDownloadJsonBtn) {
     const id = _selectedJob?.id ?? "job";
     const name = getJobDisplayName(_selectedJob).replace(/[^\w.-]+/g, "_");
     downloadTextFile(`${name || id}_output.json`, JSON.stringify(payload ?? {}, null, 2));
+  });
+}
+
+if (elDownloadInputXmlBtn) {
+  elDownloadInputXmlBtn.disabled = true;
+  elDownloadInputXmlBtn.title = "Input XML isn't stored for this job.";
+  elDownloadInputXmlBtn.addEventListener("click", async () => {
+    if (!_selectedJob) return;
+
+    const inlineInputXml = getInputXmlText(_selectedJob);
+    const inputXmlPath = getInputXmlPath(_selectedJob);
+    if (!inlineInputXml && !inputXmlPath) return;
+
+    const id = _selectedJob?.id ?? "job";
+    const name = getJobDisplayName(_selectedJob).replace(/[^\w.-]+/g, "_");
+
+    elDownloadInputXmlBtn.disabled = true;
+
+    try {
+      let inputXml = inlineInputXml;
+      if (!inputXml) {
+        const bytes = await getBytes(
+          storageRef(storage, inputXmlPath),
+          MAX_INPUT_XML_DOWNLOAD_BYTES
+        );
+        inputXml = new TextDecoder().decode(bytes);
+      }
+
+      downloadTextFile(
+        `${name || id}_input.xml`,
+        inputXml,
+        "application/xml;charset=utf-8"
+      );
+    } catch (err) {
+      alert(`Download input XML failed: ${err?.message || String(err)}`);
+    } finally {
+      const hasInputXml = Boolean(getInputXmlText(_selectedJob) || getInputXmlPath(_selectedJob));
+      elDownloadInputXmlBtn.disabled = !hasInputXml;
+    }
+  });
+}
+
+if (elDownloadOptimizedXmlBtn) {
+  elDownloadOptimizedXmlBtn.hidden = true;
+  elDownloadOptimizedXmlBtn.disabled = true;
+  elDownloadOptimizedXmlBtn.title = "No optimized geometry XML available for this job yet.";
+  elDownloadOptimizedXmlBtn.addEventListener("click", () => {
+    if (!_selectedJob) return;
+
+    const optimizedGeometryXml = getOptimizedGeometryXml(_selectedJob);
+    if (!optimizedGeometryXml) return;
+
+    const id = _selectedJob?.id ?? "job";
+    const name = getJobDisplayName(_selectedJob).replace(/[^\w.-]+/g, "_");
+    downloadTextFile(
+      `${name || id}_optimized_geometry.xml`,
+      optimizedGeometryXml,
+      "application/xml;charset=utf-8"
+    );
   });
 }
 

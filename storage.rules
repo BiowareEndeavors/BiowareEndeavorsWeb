@@ -9,6 +9,12 @@ service firebase.storage {
       allow write: if false;
     }
 
+    match /jobInputs/{jobId}/{fileName} {
+      allow read: if request.auth != null && firestore.get(/databases/(default)/documents/jobs/$(jobId)).data.uid == request.auth.uid;
+
+      allow write: if false;
+    }
+
     // default deny
     match /{allPaths=**} {
       allow read, write: if false;

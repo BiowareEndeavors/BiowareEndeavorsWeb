@@ -5,11 +5,12 @@ from typing import Any, Dict
 import requests
 
 from firebase_functions import https_fn
-from firebase_admin import firestore
+from firebase_admin import firestore, storage
 
 from config import (
     get_request_timeout_s,
     get_runpod_api_key,
+    get_storage_bucket_name,
 )
 
 RUNPOD_ENDPOINTS = {
@@ -21,6 +22,32 @@ RUNPOD_JOB_TYPES = {
     "point_solve": "single_point",
     "geometry_optimization": "geometry_optimization",
 }
+INPUT_XML_STORAGE_PREFIX = "jobInputs"
+
+def build_input_xml_storage_path(job_id: str) -> str:
+    normalized_job_id = str(job_id or "").strip()
+    if not normalized_job_id:
+        raise https_fn.HttpsError(
+            code=https_fn.FunctionsErrorCode.INVALID_ARGUMENT,
+            message="job_id is required to build the input XML storage path.",
+        )
+    return f"{INPUT_XML_STORAGE_PREFIX}/{normalized_job_id}/input.xml"
+
+def upload_job_input_xml(job_id: str, molecule_xml: str) -> str:
+    normalized_xml = str(molecule_xml or "")
+    if not normalized_xml:
+        raise https_fn.HttpsError(
+            code=https_fn.FunctionsErrorCode.INVALID_ARGUMENT,
+            message="molecule_xml is required to upload input XML.",
+        )
+
+    bucket_name = get_storage_bucket_name()
+    bucket = storage.bucket(bucket_name) if bucket_name else storage.bucket()
+    blob_path = build_input_xml_storage_path(job_id)
+    blob = bucket.blob(blob_path)
+    blob.cache_control = "private, max-age=0, no-transform"
+    blob.upload_from_string(normalized_xml, content_type="application/xml; charset=utf-8")
+    return blob_path
 
 def get_user_credits_usd(db: firestore.Client, uid: str) -> float:
     """
@@ -119,6 +146,7 @@ def create_job_doc(
     hardware_tier: str,
     max_runtime_sec: int,
     runpod_endpoint: str,
+    input_xml_path: str = "",
 ) -> str:
     db = firestore.client()
     runpod_id = upstream.get("id")
@@ -137,6 +165,7 @@ def create_job_doc(
             "hardwareTier": hardware_tier,
             "maxRuntimeSec": max_runtime_sec,
             "runpodEndpoint": runpod_endpoint,
+            **({"inputXmlRef": {"path": input_xml_path}} if input_xml_path else {}),
             "status": "IN_QUEUE",
             "statusPriority": 0,
             "needsAttention": 1,

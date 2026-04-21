@@ -32,16 +32,16 @@ const HARDWARE_TIERS = {
   budget: {
     label: "Budget",
     gpu: "RTX 5090 / RTX 4090",
-    price: "$0.001-$0.003 / s",
-    minRate: 0.001,
-    maxRate: 0.003,
+    price: "$0.002-$0.007 / s",
+    minRate: 0.002,
+    maxRate: 0.007,
   },
   performance: {
     label: "Performance",
     gpu: "H200 / H100",
-    price: "$0.005-$0.007 / s",
-    minRate: 0.005,
-    maxRate: 0.007,
+    price: "$0.01-$0.015 / s",
+    minRate: 0.010,
+    maxRate: 0.015,
   },
 };
 
