@@ -2,6 +2,8 @@
   if (typeof window === "undefined") return;
 
   var lastVolumeMode = typeof renderMode === "string" && renderMode === "volume" ? "volume" : "iso";
+  var pendingBallstickSelection = "";
+  var currentVizSelection = typeof renderMode === "string" && renderMode === "volume" ? "volume" : "iso";
   var vizUiBound = false;
 
   var moleculeShader = null;
@@ -10,6 +12,7 @@
 
   var moleculeState = {
     scene: null,
+    sourceKey: "",
     frameIndex: 0,
     playing: false,
     lastAdvanceAt: 0,
@@ -18,9 +21,19 @@
   var defaultBallstickScene = null;
   var defaultBallstickScenePromise = null;
   var DEFAULT_BALLSTICK_XML_URL = "/assets/Caffeine.xml";
+  var ANGSTROM_TO_BOHR = 1.8897259886;
+  var BALLSTICK_ATOM_SCALE = 0.5;
+  var BALLSTICK_BOND_RADIUS = 0.05;
+  var MIN_ATOM_RADIUS = 0.15 * ANGSTROM_TO_BOHR;
+  var MAX_ATOM_RADIUS = 2.5 * ANGSTROM_TO_BOHR;
+  var MIN_BOND_CUTOFF = 0.45 * ANGSTROM_TO_BOHR;
+  var DEFAULT_FIT_MIN_DISTANCE = 2.75;
+  var DEFAULT_FIT_DISTANCE_MULTIPLIER = 1.45;
+  var DEFAULT_FIT_MIN_ORBIT_RADIUS = 0.9;
+  var DEFAULT_FIT_ORBIT_RADIUS_MULTIPLIER = 0.85;
+  var volumeCamera = null;
+  var moleculeCamera = null;
 
-  uiState.atom_scale = 0.58;
-  uiState.bond_radius = 0.18;
   uiState.playback_fps = 12;
 
   var vertShaderMesh =
@@ -85,29 +98,63 @@
     "    );\n" +
     "}";
 
+  function toBohrDistance(value) {
+    return value * ANGSTROM_TO_BOHR;
+  }
+
   var ELEMENT_VISUALS = {
-    1: { color: [0.94, 0.94, 0.94], radius: 0.31 },
-    5: { color: [1.0, 0.71, 0.71], radius: 0.84 },
-    6: { color: [0.22, 0.22, 0.24], radius: 0.76 },
-    7: { color: [0.19, 0.31, 0.97], radius: 0.71 },
-    8: { color: [0.92, 0.18, 0.18], radius: 0.66 },
-    9: { color: [0.56, 0.88, 0.31], radius: 0.57 },
-    14: { color: [0.95, 0.78, 0.47], radius: 1.11 },
-    15: { color: [1.0, 0.5, 0.0], radius: 1.07 },
-    16: { color: [0.95, 0.9, 0.2], radius: 1.05 },
-    17: { color: [0.12, 0.94, 0.12], radius: 1.02 },
-    35: { color: [0.65, 0.16, 0.16], radius: 1.2 },
-    53: { color: [0.58, 0.0, 0.58], radius: 1.39 },
+    1: { color: [0.94, 0.94, 0.94], radius: toBohrDistance(0.31) },
+    5: { color: [1.0, 0.71, 0.71], radius: toBohrDistance(0.84) },
+    6: { color: [0.22, 0.22, 0.24], radius: toBohrDistance(0.76) },
+    7: { color: [0.19, 0.31, 0.97], radius: toBohrDistance(0.71) },
+    8: { color: [0.92, 0.18, 0.18], radius: toBohrDistance(0.66) },
+    9: { color: [0.56, 0.88, 0.31], radius: toBohrDistance(0.57) },
+    14: { color: [0.95, 0.78, 0.47], radius: toBohrDistance(1.11) },
+    15: { color: [1.0, 0.5, 0.0], radius: toBohrDistance(1.07) },
+    16: { color: [0.95, 0.9, 0.2], radius: toBohrDistance(1.05) },
+    17: { color: [0.12, 0.94, 0.12], radius: toBohrDistance(1.02) },
+    35: { color: [0.65, 0.16, 0.16], radius: toBohrDistance(1.2) },
+    53: { color: [0.58, 0.0, 0.58], radius: toBohrDistance(1.39) },
+  };
+  var ELEMENT_INFO = {
+    1: { symbol: "H", name: "Hydrogen" },
+    5: { symbol: "B", name: "Boron" },
+    6: { symbol: "C", name: "Carbon" },
+    7: { symbol: "N", name: "Nitrogen" },
+    8: { symbol: "O", name: "Oxygen" },
+    9: { symbol: "F", name: "Fluorine" },
+    14: { symbol: "Si", name: "Silicon" },
+    15: { symbol: "P", name: "Phosphorus" },
+    16: { symbol: "S", name: "Sulfur" },
+    17: { symbol: "Cl", name: "Chlorine" },
+    35: { symbol: "Br", name: "Bromine" },
+    53: { symbol: "I", name: "Iodine" },
   };
 
   function getElementVisual(atomicNumber) {
-    return ELEMENT_VISUALS[atomicNumber] || { color: [0.62, 0.72, 0.82], radius: 0.9 };
+    return ELEMENT_VISUALS[atomicNumber] || {
+      color: [0.62, 0.72, 0.82],
+      radius: toBohrDistance(0.9),
+    };
   }
 
   function clampNumber(value, min, max, fallback) {
     var num = Number(value);
     if (!isFinite(num)) return fallback;
     return Math.max(min, Math.min(max, num));
+  }
+
+  function toCssRgb(color) {
+    return "rgb(" +
+      Math.round(clampNumber(color[0], 0, 1, 0) * 255) + ", " +
+      Math.round(clampNumber(color[1], 0, 1, 0) * 255) + ", " +
+      Math.round(clampNumber(color[2], 0, 1, 0) * 255) + ")";
+  }
+
+  function getElementLabel(atomicNumber) {
+    var info = ELEMENT_INFO[atomicNumber];
+    if (!info) return "Z=" + atomicNumber;
+    return info.symbol + " " + info.name;
   }
 
   function parseHexColor(hex) {
@@ -218,6 +265,31 @@
     return normalized;
   }
 
+  function getScenePositionScale(input) {
+    var unit = String(
+      input.positionUnits ||
+      input.position_units ||
+      input.coordinateUnits ||
+      input.coordinate_units ||
+      ""
+    ).trim().toLowerCase();
+
+    if (!unit) return 1.0;
+    if (unit === "bohr" || unit === "bohrs" || unit === "a0" || unit === "au") return 1.0;
+    if (unit.indexOf("angstrom") >= 0) return ANGSTROM_TO_BOHR;
+    return 1.0;
+  }
+
+  function scaleFramePositions(frame, scale) {
+    if (!(scale > 0) || Math.abs(scale - 1.0) < 1e-6) return frame;
+
+    var scaled = new Float32Array(frame.length);
+    for (var i = 0; i < frame.length; ++i) {
+      scaled[i] = frame[i] * scale;
+    }
+    return scaled;
+  }
+
   function normalizeAtomColors(raw, atomicNumbers) {
     var atomCount = atomicNumbers.length;
     var colors = new Float32Array(atomCount * 3);
@@ -272,7 +344,7 @@
 
     for (var i = 0; i < atomCount; ++i) {
       var fallback = getElementVisual(atomicNumbers[i]).radius;
-      radii[i] = clampNumber(values[i], 0.15, 2.5, fallback);
+      radii[i] = clampNumber(values[i], MIN_ATOM_RADIUS, MAX_ATOM_RADIUS, fallback);
     }
 
     return radii;
@@ -351,6 +423,71 @@
     return values;
   }
 
+  function getPubChemXmlCoordinateScale(doc, fallbackScale) {
+    var scale = Number(fallbackScale);
+    if (!(scale > 0)) scale = ANGSTROM_TO_BOHR;
+
+    var all = doc && typeof doc.getElementsByTagName === "function" ? doc.getElementsByTagName("*") : [];
+    for (var i = 0; i < all.length; ++i) {
+      if (xmlLocalName(all[i]) !== "PC-CoordinateType") continue;
+
+      var unit = String(all[i].getAttribute("value") || "").trim().toLowerCase();
+      if (!unit) continue;
+      if (unit === "units-angstroms") return ANGSTROM_TO_BOHR;
+      if (unit === "units-bohr" || unit === "units-bohrs") return 1.0;
+    }
+
+    return scale;
+  }
+
+  function parsePubChemXmlBonds(doc, atomAids, coordAids, atomCount) {
+    var aid1El = findFirstXmlNode(doc, "PC-Bonds_aid1");
+    var aid2El = findFirstXmlNode(doc, "PC-Bonds_aid2");
+    if (!aid1El || !aid2El) return null;
+
+    var aid1List = parseXmlNumericList(aid1El, "PC-Bonds_aid1_E").map(function (value) {
+      return Math.trunc(value);
+    });
+    var aid2List = parseXmlNumericList(aid2El, "PC-Bonds_aid2_E").map(function (value) {
+      return Math.trunc(value);
+    });
+
+    if (!aid1List.length || aid1List.length !== aid2List.length) {
+      return null;
+    }
+
+    var orderedAids = [];
+    if (coordAids.length === atomCount) {
+      orderedAids = coordAids.slice();
+    } else if (atomAids.length === atomCount) {
+      orderedAids = atomAids.slice();
+    } else {
+      return null;
+    }
+
+    var indexByAid = {};
+    for (var aidIndex = 0; aidIndex < orderedAids.length; ++aidIndex) {
+      indexByAid[Math.trunc(orderedAids[aidIndex])] = aidIndex;
+    }
+
+    var bonds = [];
+    var seen = {};
+    for (var bondIndex = 0; bondIndex < aid1List.length; ++bondIndex) {
+      var a = indexByAid[aid1List[bondIndex]];
+      var b = indexByAid[aid2List[bondIndex]];
+      if (!isFinite(a) || !isFinite(b) || a === b) continue;
+
+      var lo = Math.min(a, b);
+      var hi = Math.max(a, b);
+      var key = lo + ":" + hi;
+      if (seen[key]) continue;
+      seen[key] = true;
+      bonds.push([lo, hi]);
+    }
+
+    return bonds.length ? bonds : null;
+  }
+
   function parsePubChemXmlScene(xmlText, options) {
     var opts = options || {};
     var parser = new DOMParser();
@@ -383,6 +520,7 @@
       throw new Error("Atom and coordinate counts do not match.");
     }
 
+    var coordinateScale = getPubChemXmlCoordinateScale(doc, opts.coordinateScale);
     var atomAids = atomsAidEl ? parseXmlNumericList(atomsAidEl, "PC-Atoms_aid_E") : [];
     var coordAids = coordsAidEl ? parseXmlNumericList(coordsAidEl, "PC-Coordinates_aid_E") : [];
     var orderedAtomicNumbers = atomNumbers.slice();
@@ -400,17 +538,24 @@
 
     var positions = new Float32Array(orderedAtomicNumbers.length * 3);
     for (var i = 0; i < orderedAtomicNumbers.length; ++i) {
-      positions[i * 3 + 0] = xs[i];
-      positions[i * 3 + 1] = ys[i];
-      positions[i * 3 + 2] = zs[i];
+      positions[i * 3 + 0] = xs[i] * coordinateScale;
+      positions[i * 3 + 1] = ys[i] * coordinateScale;
+      positions[i * 3 + 2] = zs[i] * coordinateScale;
     }
 
-    return {
+    var bonds = parsePubChemXmlBonds(doc, atomAids, coordAids, orderedAtomicNumbers.length);
+
+    var scene = {
       label: opts.label || "Caffeine",
       atomicNumbers: orderedAtomicNumbers,
       positions: positions,
-      bonds: [],
     };
+
+    if (bonds) {
+      scene.bonds = bonds;
+    }
+
+    return scene;
   }
 
   function ensureDefaultBallstickScene() {
@@ -442,6 +587,68 @@
     return defaultBallstickScenePromise;
   }
 
+  function hasCurrentJobMoleculeSource() {
+    return typeof window.getCurrentMoleculeSceneSource === "function" && !!window.getCurrentMoleculeSceneSource();
+  }
+
+  function getCurrentJobMoleculeSourceKey() {
+    if (typeof window.getCurrentMoleculeSceneSourceKey !== "function") return "";
+    return String(window.getCurrentMoleculeSceneSourceKey() || "");
+  }
+
+  function moleculeSceneMatchesCurrentJobSource() {
+    var sourceKey = getCurrentJobMoleculeSourceKey();
+    if (!sourceKey) return !!moleculeState.scene;
+    return moleculeState.sourceKey === sourceKey;
+  }
+
+  function syncCachedCameras() {
+    if (!camera) return;
+    volumeCamera = camera;
+    moleculeCamera = camera;
+  }
+
+  function normalizeVisualizationMode(mode) {
+    if (mode === "volume+ballstick") return "volume_ballstick";
+    if (mode === "volume_ballstick") return "volume_ballstick";
+    if (mode === "ballstick") return "ballstick";
+    if (mode === "volume") return "volume";
+    return "iso";
+  }
+
+  function selectionShowsVolume(selection) {
+    return selection === "volume" || selection === "volume_ballstick";
+  }
+
+  function selectionShowsBallstick(selection) {
+    return selection === "ballstick" || selection === "volume_ballstick";
+  }
+
+  function selectionUsesVolumeShader(selection) {
+    return selection !== "iso";
+  }
+
+  function getEffectiveVizSelection() {
+    return pendingBallstickSelection || currentVizSelection;
+  }
+
+  function loadCurrentJobBallstickScene(selection, options) {
+    var opts = options || {};
+    if (typeof window.loadCurrentJobMoleculeScene !== "function" || !hasCurrentJobMoleculeSource()) {
+      return Promise.resolve(false);
+    }
+
+    return Promise.resolve(
+      window.loadCurrentJobMoleculeScene({
+        autoEnterMode: true,
+        preserveCamera: !!opts.preserveCamera,
+        visualizationMode: normalizeVisualizationMode(selection),
+      })
+    ).then(function (loaded) {
+      return !!loaded;
+    });
+  }
+
   function inferBonds(atomicNumbers, frame, radii) {
     var atomCount = atomicNumbers.length;
     var bonds = [];
@@ -454,7 +661,7 @@
         var distSq = dx * dx + dy * dy + dz * dz;
         if (distSq <= 0.0001) continue;
 
-        var cutoff = Math.max(0.45, 1.15 * (radii[i] + radii[j]));
+        var cutoff = Math.max(MIN_BOND_CUTOFF, 1.15 * (radii[i] + radii[j]));
         if (distSq <= cutoff * cutoff) {
           bonds.push([i, j]);
         }
@@ -495,13 +702,23 @@
   }
 
   function normalizeMoleculeScene(input) {
-    var scene = input && typeof input === "object" ? input : null;
+    var root = input && typeof input === "object" ? input : null;
+    var scene = root;
     if (!scene) return null;
 
     if (scene.moleculeScene && typeof scene.moleculeScene === "object") {
       scene = scene.moleculeScene;
     } else if (scene.visualization && typeof scene.visualization === "object") {
       scene = scene.visualization;
+    } else if (scene.MolecularDynamics && typeof scene.MolecularDynamics === "object") {
+      scene = Object.assign({}, scene.MolecularDynamics, {
+        label:
+          scene.MolecularDynamics.label ||
+          root.label ||
+          root.name ||
+          "MD Trajectory",
+        visualizationLock: "ballstick",
+      });
     }
 
     var atomicNumbers = normalizeAtomicNumbers(scene);
@@ -510,12 +727,22 @@
     var frames = normalizeFrames(scene, atomicNumbers.length);
     if (!frames.length) return null;
 
+    var positionScale = getScenePositionScale(scene);
+    if (Math.abs(positionScale - 1.0) >= 1e-6) {
+      frames = frames.map(function (frame) {
+        return scaleFramePositions(frame, positionScale);
+      });
+    }
+
     var atomColors = normalizeAtomColors(scene.atomColors || scene.colors, atomicNumbers);
     var atomRadii = normalizeAtomRadii(scene.atomRadii || scene.radii, atomicNumbers);
+    var hasExplicitBonds = Array.isArray(scene.bonds);
     var bonds = normalizeBondList(scene.bonds, atomicNumbers.length);
+    var dynamicBonds = false;
 
-    if (!bonds.length && !Array.isArray(scene.bonds)) {
+    if (!bonds.length && !hasExplicitBonds) {
       bonds = inferBonds(atomicNumbers, frames[0], atomRadii);
+      dynamicBonds = frames.length > 1;
     }
 
     var bounds = computeSceneBounds(frames);
@@ -536,14 +763,16 @@
     var radius = Math.max(1.0, 0.5 * Math.sqrt(dx * dx + dy * dy + dz * dz) + maxRadius * 1.8);
 
     return {
-      label: scene.label || scene.name || "",
+      label: scene.label || scene.name || scene.detail || "",
       atomicNumbers: atomicNumbers,
       frames: frames,
       atomColors: atomColors,
       atomRadii: atomRadii,
       bonds: bonds,
+      dynamicBonds: dynamicBonds,
       center: center,
       radius: radius,
+      visualizationLock: scene.visualizationLock || "",
     };
   }
 
@@ -773,12 +1002,14 @@
     var atomCount = scene.atomicNumbers.length;
     var atomModels = new Float32Array(atomCount * 16);
     var atomColors = new Float32Array(atomCount * 3);
+    var atomRenderRadii = new Float32Array(atomCount);
 
     for (var atomIndex = 0; atomIndex < atomCount; ++atomIndex) {
       var px = frame[atomIndex * 3 + 0];
       var py = frame[atomIndex * 3 + 1];
       var pz = frame[atomIndex * 3 + 2];
-      var radius = Math.max(0.08, scene.atomRadii[atomIndex] * uiState.atom_scale);
+      var radius = Math.max(0.08, scene.atomRadii[atomIndex] * BALLSTICK_ATOM_SCALE);
+      atomRenderRadii[atomIndex] = radius;
 
       writeSphereMatrix(atomModels, atomIndex * 16, px, py, pz, radius);
 
@@ -789,25 +1020,59 @@
 
     uploadInstanceData(moleculeAtomMesh, atomModels, atomColors, atomCount);
 
-    var maxBondCount = scene.bonds.length;
+    var activeBonds = scene.dynamicBonds
+      ? inferBonds(scene.atomicNumbers, frame, scene.atomRadii)
+      : scene.bonds;
+    var maxBondCount = activeBonds.length;
     var bondModels = new Float32Array(Math.max(1, maxBondCount) * 16);
     var bondColors = new Float32Array(Math.max(1, maxBondCount) * 3);
     var actualBondCount = 0;
 
-    for (var bondIndex = 0; bondIndex < scene.bonds.length; ++bondIndex) {
-      var bond = scene.bonds[bondIndex];
+    for (var bondIndex = 0; bondIndex < activeBonds.length; ++bondIndex) {
+      var bond = activeBonds[bondIndex];
       var a = bond[0];
       var b = bond[1];
+      var ax = frame[a * 3 + 0];
+      var ay = frame[a * 3 + 1];
+      var az = frame[a * 3 + 2];
+      var bx = frame[b * 3 + 0];
+      var by = frame[b * 3 + 1];
+      var bz = frame[b * 3 + 2];
+      var dx = bx - ax;
+      var dy = by - ay;
+      var dz = bz - az;
+      var bondLength = Math.sqrt(dx * dx + dy * dy + dz * dz);
+      if (!(bondLength > 1e-5)) continue;
+
+      var dirX = dx / bondLength;
+      var dirY = dy / bondLength;
+      var dirZ = dz / bondLength;
+      var bondRadius = BALLSTICK_BOND_RADIUS;
+      var trimA = Math.min(
+        bondLength * 0.35,
+        Math.max(bondRadius * 0.75, atomRenderRadii[a] * 0.82)
+      );
+      var trimB = Math.min(
+        bondLength * 0.35,
+        Math.max(bondRadius * 0.75, atomRenderRadii[b] * 0.82)
+      );
+      var startX = ax + dirX * trimA;
+      var startY = ay + dirY * trimA;
+      var startZ = az + dirZ * trimA;
+      var endX = bx - dirX * trimB;
+      var endY = by - dirY * trimB;
+      var endZ = bz - dirZ * trimB;
+
       var ok = writeCylinderMatrix(
         bondModels,
         actualBondCount * 16,
-        frame[a * 3 + 0],
-        frame[a * 3 + 1],
-        frame[a * 3 + 2],
-        frame[b * 3 + 0],
-        frame[b * 3 + 1],
-        frame[b * 3 + 2],
-        clampNumber(uiState.bond_radius, 0.04, 0.5, 0.18)
+        startX,
+        startY,
+        startZ,
+        endX,
+        endY,
+        endZ,
+        bondRadius
       );
 
       if (!ok) continue;
@@ -838,110 +1103,256 @@
     return moleculeState.scene ? moleculeState.scene.frames.length : 0;
   }
 
+  function sceneRequiresBallstickOnly() {
+    return !!(moleculeState.scene && moleculeState.scene.visualizationLock === "ballstick");
+  }
+
   function syncBallstickAvailability() {
-    var radio = document.getElementById("vizModeBallstick");
-    if (!radio) return;
+    var toggle = document.getElementById("vizModeBallstick");
+    if (!toggle) return;
 
     var hasScene = !!moleculeState.scene;
-    radio.title = hasScene ? "" : "Load the Caffeine atom scene.";
-
-    if (!hasScene && renderMode === "ballstick") {
-      renderMode = lastVolumeMode;
-    }
+    toggle.title = sceneRequiresBallstickOnly()
+      ? "This trajectory is currently rendered in Ball & Stick only."
+      : hasScene
+        ? ""
+        : "Loads the active job molecule if available.";
   }
 
   function syncPlaybackUi() {
-    var frameWrap = document.getElementById("vizBallPlayback");
-    var frameSlider = document.getElementById("ui_md_frame");
-    var frameInput = document.getElementById("ui_md_frame_in");
-    var frameLabel = document.getElementById("ui_md_frame_label");
-    var playButton = document.getElementById("ui_md_play");
+    var group = document.getElementById("vizGroupPlayback");
+    var playButton = document.getElementById("vizPlaybackToggleBtn");
+    var simMoreFramesButton = document.getElementById("vizSimMoreFramesBtn");
+    var frameReadout = document.getElementById("vizFrameReadout");
+    var frameSlider = document.getElementById("vizFrameSlider");
+    var frameInput = document.getElementById("vizFrameInput");
+    var fpsSlider = document.getElementById("vizPlaybackFpsSlider");
+    var fpsInput = document.getElementById("vizPlaybackFpsInput");
     var frameCount = getMoleculeFrameCount();
-    var hasFrames = frameCount > 0;
-    var hasAnimation = frameCount > 1;
+    var hasPlayback = frameCount > 1;
+    var frameIndex = Math.max(0, moleculeState.frameIndex);
+    var fps = Math.round(clampNumber(uiState.playback_fps, 1, 60, 12));
 
-    if (frameWrap) frameWrap.style.display = hasFrames ? "" : "none";
+    uiState.playback_fps = fps;
 
-    if (frameSlider) {
-      frameSlider.disabled = !hasAnimation;
-      frameSlider.min = "0";
-      frameSlider.max = String(Math.max(0, frameCount - 1));
-      frameSlider.value = String(Math.min(moleculeState.frameIndex, Math.max(0, frameCount - 1)));
-    }
-
-    if (frameInput) {
-      frameInput.disabled = !hasAnimation;
-      frameInput.min = "1";
-      frameInput.max = String(Math.max(1, frameCount));
-      frameInput.value = String(frameCount ? moleculeState.frameIndex + 1 : 1);
-    }
-
-    if (frameLabel) {
-      frameLabel.textContent = hasFrames
-        ? "Frame " + (moleculeState.frameIndex + 1) + " / " + frameCount
-        : "Frame 0 / 0";
+    if (group) {
+      group.hidden = !hasPlayback;
     }
 
     if (playButton) {
-      playButton.disabled = !hasAnimation;
+      playButton.disabled = !hasPlayback;
       playButton.textContent = moleculeState.playing ? "Pause" : "Play";
+    }
+
+    if (simMoreFramesButton) {
+      var canSimMoreFrames =
+        hasPlayback &&
+        moleculeSceneMatchesCurrentJobSource() &&
+        typeof window.canSimMoreFramesForCurrentJob === "function" &&
+        window.canSimMoreFramesForCurrentJob();
+      simMoreFramesButton.hidden = !canSimMoreFrames;
+      simMoreFramesButton.disabled = !canSimMoreFrames;
+      simMoreFramesButton.title = canSimMoreFrames
+        ? "Submit another MD segment starting from the current simulation's final frame."
+        : "Load a completed MD job to simulate more frames.";
+    }
+
+    if (frameReadout) {
+      frameReadout.textContent = hasPlayback
+        ? "Frame " + frameIndex + " / " + (frameCount - 1)
+        : "Single frame";
+    }
+
+    if (frameSlider) {
+      frameSlider.min = "0";
+      frameSlider.max = String(Math.max(0, frameCount - 1));
+      frameSlider.value = String(Math.min(frameIndex, Math.max(0, frameCount - 1)));
+      frameSlider.disabled = !hasPlayback;
+    }
+
+    if (frameInput) {
+      frameInput.min = "0";
+      frameInput.max = String(Math.max(0, frameCount - 1));
+      frameInput.value = String(Math.min(frameIndex, Math.max(0, frameCount - 1)));
+      frameInput.disabled = !hasPlayback;
+    }
+
+    if (fpsSlider) {
+      fpsSlider.value = String(fps);
+      fpsSlider.disabled = !hasPlayback;
+    }
+
+    if (fpsInput) {
+      fpsInput.value = String(fps);
+      fpsInput.disabled = !hasPlayback;
     }
   }
 
+  function getLegendAtomicNumbers() {
+    if (moleculeState.scene && moleculeState.scene.atomicNumbers && moleculeState.scene.atomicNumbers.length) {
+      var seen = {};
+      var present = [];
+      for (var i = 0; i < moleculeState.scene.atomicNumbers.length; ++i) {
+        var atomicNumber = moleculeState.scene.atomicNumbers[i];
+        if (seen[atomicNumber]) continue;
+        seen[atomicNumber] = true;
+        present.push(atomicNumber);
+      }
+      return present;
+    }
+
+    return Object.keys(ELEMENT_VISUALS)
+      .map(function (key) {
+        return Number(key);
+      })
+      .sort(function (a, b) {
+        return a - b;
+      });
+  }
+
+  function syncAtomLegendUi() {
+    var legend = document.getElementById("vizAtomLegend");
+    var list = document.getElementById("vizAtomLegendList");
+    var selection = getEffectiveVizSelection();
+    var showLegend = selectionShowsBallstick(selection);
+
+    if (legend) {
+      legend.hidden = !showLegend;
+    }
+    if (!showLegend || !list) return;
+
+    var atomNumbers = getLegendAtomicNumbers();
+    list.innerHTML = atomNumbers.map(function (atomicNumber) {
+      var visual = getElementVisual(atomicNumber);
+      return (
+        '<div class="viz-legend-item">' +
+          '<span class="viz-legend-swatch" style="background:' + toCssRgb(visual.color) + ';"></span>' +
+          '<span class="viz-legend-label">' + getElementLabel(atomicNumber) + '</span>' +
+        '</div>'
+      );
+    }).join("");
+  }
+
   function syncModeUi() {
+    var modeOptions = document.getElementById("vizModeOptions");
     var isoRadio = document.getElementById("vizModeIso");
     var volRadio = document.getElementById("vizModeVolume");
     var ballRadio = document.getElementById("vizModeBallstick");
     var groupVol = document.getElementById("vizGroupVolume");
     var groupIso = document.getElementById("vizGroupIso");
-    var groupBall = document.getElementById("vizGroupBallstick");
+    var selection = getEffectiveVizSelection();
+    var ballstickOnly = sceneRequiresBallstickOnly();
 
-    if (isoRadio) isoRadio.checked = renderMode === "iso";
-    if (volRadio) volRadio.checked = renderMode === "volume";
-    if (ballRadio) ballRadio.checked = renderMode === "ballstick";
+    if (modeOptions) {
+      modeOptions.hidden = ballstickOnly;
+    }
 
-    if (groupVol) groupVol.style.display = renderMode === "volume" ? "" : "none";
-    if (groupIso) groupIso.style.display = renderMode === "iso" ? "" : "none";
-    if (groupBall) groupBall.style.display = renderMode === "ballstick" ? "" : "none";
+    if (isoRadio) {
+      isoRadio.checked = !ballstickOnly && selection === "iso";
+      isoRadio.disabled = ballstickOnly;
+      isoRadio.title = ballstickOnly ? "This trajectory uses Ball & Stick only." : "";
+    }
+    if (volRadio) {
+      volRadio.checked = !ballstickOnly && selectionShowsVolume(selection);
+      volRadio.disabled = ballstickOnly;
+      volRadio.title = ballstickOnly ? "This trajectory uses Ball & Stick only." : "";
+    }
+    if (ballRadio) {
+      ballRadio.checked = ballstickOnly || selectionShowsBallstick(selection);
+      ballRadio.title = ballstickOnly ? "This trajectory uses Ball & Stick only." : "";
+    }
+
+    if (groupVol) groupVol.style.display = !ballstickOnly && selectionShowsVolume(selection) ? "" : "none";
+    if (groupIso) groupIso.style.display = !ballstickOnly && selection === "iso" ? "" : "none";
 
     syncBallstickAvailability();
     syncPlaybackUi();
+    syncAtomLegendUi();
   }
 
   function setVisualizationMode(mode, options) {
     var opts = options || {};
+    var nextSelection = normalizeVisualizationMode(mode);
+    var wantsBallstick = selectionShowsBallstick(nextSelection);
+    var needsCurrentJobScene = wantsBallstick && hasCurrentJobMoleculeSource() && !moleculeSceneMatchesCurrentJobSource();
 
-    if (mode === "ballstick") {
-      if (!moleculeState.scene && !opts.force) {
-        ensureDefaultBallstickScene()
-          .then(function (scene) {
-            var ballRadio = document.getElementById("vizModeBallstick");
+    if (wantsBallstick && !opts.force && (!moleculeState.scene || needsCurrentJobScene)) {
+      pendingBallstickSelection = nextSelection;
+      syncModeUi();
+      loadCurrentJobBallstickScene(nextSelection, {
+        preserveCamera: !!opts.preserveBallstickCamera,
+      })
+        .then(function (loaded) {
+          if (loaded || pendingBallstickSelection !== nextSelection) return loaded;
+          if (hasCurrentJobMoleculeSource()) return false;
+
+          return ensureDefaultBallstickScene().then(function (scene) {
+            if (pendingBallstickSelection !== nextSelection) return false;
             window.loadMoleculeScene(scene, {
-              autoEnterMode: !ballRadio || ballRadio.checked,
+              autoEnterMode: true,
+              preserveCamera: !!opts.preserveBallstickCamera,
+              visualizationMode: nextSelection,
             });
-          })
-          .catch(function (err) {
-            syncModeUi();
-            alert(err && err.message ? err.message : "Unable to load Caffeine.xml.");
+            return true;
           });
-        return false;
+        })
+        .catch(function (err) {
+          pendingBallstickSelection = "";
+          syncModeUi();
+          alert(err && err.message ? err.message : "Unable to load molecule scene.");
+        });
+      return false;
+    }
+
+    pendingBallstickSelection = "";
+    currentVizSelection = nextSelection;
+
+    syncCachedCameras();
+
+    if (selectionUsesVolumeShader(nextSelection)) {
+      lastVolumeMode = "volume";
+      if (typeof originalSwitchRenderMode === "function" && renderMode !== "volume") {
+        originalSwitchRenderMode("volume");
       }
-      renderMode = "ballstick";
+
+      if (volumeCamera) {
+        camera = volumeCamera;
+      }
+
+      if (selectionShowsBallstick(nextSelection)) {
+        if (opts.preserveBallstickCamera && camera) {
+          moleculeCamera = camera;
+          moleculeState.newUpload = false;
+        } else if (!camera && moleculeCamera) {
+          camera = moleculeCamera;
+          moleculeState.newUpload = false;
+        }
+      } else {
+        moleculeState.playing = false;
+      }
+
       samplingRate = 1.0;
       syncModeUi();
       return true;
     }
 
-    if (mode === "iso" || mode === "volume") {
-      lastVolumeMode = mode;
-      if (typeof switchRenderMode === "function") {
-        switchRenderMode(mode);
+    moleculeState.playing = false;
+    if (wantsBallstick) {
+      if (opts.preserveBallstickCamera && camera) {
+        moleculeState.newUpload = false;
+        syncCachedCameras();
+      } else if (!camera && moleculeCamera) {
+        camera = moleculeCamera;
+        moleculeState.newUpload = false;
       }
-      syncModeUi();
-      return true;
     }
 
-    return false;
+    if (typeof originalSwitchRenderMode === "function" && renderMode !== "iso") {
+      originalSwitchRenderMode("iso");
+    }
+
+    syncModeUi();
+    return true;
   }
 
   window.setVisualizationMode = setVisualizationMode;
@@ -966,6 +1377,17 @@
     if (getMoleculeFrameCount() <= 1) return;
     moleculeState.playing = !moleculeState.playing;
     moleculeState.lastAdvanceAt = performance.now();
+    syncPlaybackUi();
+  }
+
+  function seekPlaybackFrame(nextFrame) {
+    moleculeState.playing = false;
+    moleculeState.lastAdvanceAt = 0;
+    setMoleculeFrame(nextFrame, { force: true });
+  }
+
+  function setPlaybackFps(nextFps) {
+    uiState.playback_fps = Math.round(clampNumber(nextFps, 1, 60, 12));
     syncPlaybackUi();
   }
 
@@ -1004,19 +1426,21 @@
       vec3.create(),
       scene.center[0],
       scene.center[1],
-      scene.center[2] + Math.max(6.0, scene.radius * 3.2)
+      scene.center[2] + Math.max(DEFAULT_FIT_MIN_DISTANCE, scene.radius * DEFAULT_FIT_DISTANCE_MULTIPLIER)
     );
 
     camera = new ArcballCamera(
       eye,
       centerVec,
       up,
-      Math.max(2.0, scene.radius * 1.4),
+      Math.max(DEFAULT_FIT_MIN_ORBIT_RADIUS, scene.radius * DEFAULT_FIT_ORBIT_RADIUS_MULTIPLIER),
       [Math.max(1, WIDTH), Math.max(1, HEIGHT)]
     );
+    syncCachedCameras();
   }
 
-  function renderMoleculeScene() {
+  function renderMoleculeScene(options) {
+    var opts = options || {};
     if (!moleculeState.scene || !moleculeShader || !gl) return;
 
     if (moleculeState.newUpload) {
@@ -1026,12 +1450,15 @@
 
     gl.enable(gl.DEPTH_TEST);
     gl.depthMask(true);
-    gl.enable(gl.CULL_FACE);
-    gl.cullFace(gl.BACK);
+    gl.disable(gl.CULL_FACE);
     gl.disable(gl.BLEND);
 
-    gl.clearColor(0.0, 0.0, 0.0, 1.0);
-    gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+    if (opts.overlay) {
+      gl.clear(gl.DEPTH_BUFFER_BIT);
+    } else {
+      gl.clearColor(0.0, 0.0, 0.0, 1.0);
+      gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+    }
 
     moleculeShader.use(gl);
 
@@ -1073,15 +1500,12 @@
 
   var originalSwitchRenderMode = switchRenderMode;
   switchRenderMode = function (mode) {
-    if (mode === "ballstick") {
-      return setVisualizationMode("ballstick");
-    }
-
     if (mode === "iso" || mode === "volume") {
       lastVolumeMode = mode;
     }
 
     originalSwitchRenderMode(mode);
+
     syncModeUi();
     return true;
   };
@@ -1104,9 +1528,21 @@
 
     var near = 0.1;
     var far = 100.0;
-    if (renderMode === "ballstick" && moleculeState.scene) {
-      near = Math.max(0.02, moleculeState.scene.radius * 0.02);
-      far = Math.max(80.0, moleculeState.scene.radius * 24.0);
+    var selection = currentVizSelection;
+    var showsVolume = selection === "iso" || selectionShowsVolume(selection);
+    var showsBallstick = selectionShowsBallstick(selection) && moleculeState.scene;
+
+    if (showsVolume && typeof window.getVolumeSceneMetrics === "function") {
+      var volumeMetrics = window.getVolumeSceneMetrics();
+      if (volumeMetrics && volumeMetrics.radius > 0) {
+        near = Math.max(0.05, volumeMetrics.radius * 0.02);
+        far = Math.max(100.0, volumeMetrics.radius * 12.0);
+      }
+    }
+
+    if (showsBallstick) {
+      near = Math.min(near, Math.max(0.02, moleculeState.scene.radius * 0.02));
+      far = Math.max(far, Math.max(80.0, moleculeState.scene.radius * 24.0));
     }
 
     proj = mat4.perspective(mat4.create(), (60 * Math.PI) / 180.0, WIDTH / HEIGHT, near, far);
@@ -1219,15 +1655,27 @@
       });
     }
 
+    function applyCompositeSelection() {
+      var wantsVolume = !!(volRadio && volRadio.checked);
+      var wantsBallstick = !!(ballRadio && ballRadio.checked);
+      var nextSelection = wantsVolume
+        ? (wantsBallstick ? "volume_ballstick" : "volume")
+        : (wantsBallstick ? "ballstick" : "iso");
+
+      setVisualizationMode(nextSelection, {
+        preserveBallstickCamera: true,
+      });
+    }
+
     if (volRadio) {
       volRadio.addEventListener("change", function () {
-        if (volRadio.checked) setVisualizationMode("volume");
+        applyCompositeSelection();
       });
     }
 
     if (ballRadio) {
       ballRadio.addEventListener("change", function () {
-        if (ballRadio.checked) setVisualizationMode("ballstick");
+        applyCompositeSelection();
       });
     }
 
@@ -1236,35 +1684,54 @@
     bindSliderAndInput("vol_alpha_hi", "ui_alpha_end", "ui_alpha_end_in");
     bindSliderAndInput("opacity_strength", "ui_opacity", "ui_opacity_in");
     bindSliderAndInput("iso_value", "ui_isovalue", "ui_isovalue_in");
-    bindSliderAndInput("atom_scale", "ui_atom_scale", "ui_atom_scale_in", {
-      onChange: rebuildMoleculeInstanceData,
-    });
-    bindSliderAndInput("bond_radius", "ui_bond_radius", "ui_bond_radius_in", {
-      onChange: rebuildMoleculeInstanceData,
-    });
-    bindSliderAndInput("playback_fps", "ui_md_fps", "ui_md_fps_in");
 
-    var frameSlider = document.getElementById("ui_md_frame");
-    var frameInput = document.getElementById("ui_md_frame_in");
-    var playButton = document.getElementById("ui_md_play");
+    var playbackToggle = document.getElementById("vizPlaybackToggleBtn");
+    if (playbackToggle) {
+      playbackToggle.addEventListener("click", function () {
+        togglePlayback();
+      });
+    }
 
+    var simMoreFramesButton = document.getElementById("vizSimMoreFramesBtn");
+    if (simMoreFramesButton) {
+      simMoreFramesButton.addEventListener("click", function () {
+        if (typeof window.openCurrentMdContinuationModal !== "function") return;
+
+        simMoreFramesButton.disabled = true;
+        Promise.resolve(window.openCurrentMdContinuationModal())
+          .catch(function (err) {
+            alert("Sim more frames failed: " + ((err && err.message) || String(err)));
+          })
+          .finally(function () {
+            syncPlaybackUi();
+          });
+      });
+    }
+
+    var frameSlider = document.getElementById("vizFrameSlider");
+    var frameInput = document.getElementById("vizFrameInput");
     if (frameSlider) {
       frameSlider.addEventListener("input", function () {
-        setMoleculeFrame(Number(frameSlider.value));
+        seekPlaybackFrame(frameSlider.value);
       });
     }
-
     if (frameInput) {
       frameInput.addEventListener("input", function () {
-        if (frameInput.value === "" || frameInput.value === "-") return;
-        var value = Math.trunc(Number(frameInput.value));
-        if (!isFinite(value)) return;
-        setMoleculeFrame(value - 1);
+        seekPlaybackFrame(frameInput.value);
       });
     }
 
-    if (playButton) {
-      playButton.addEventListener("click", togglePlayback);
+    var fpsSlider = document.getElementById("vizPlaybackFpsSlider");
+    var fpsInput = document.getElementById("vizPlaybackFpsInput");
+    if (fpsSlider) {
+      fpsSlider.addEventListener("input", function () {
+        setPlaybackFps(fpsSlider.value);
+      });
+    }
+    if (fpsInput) {
+      fpsInput.addEventListener("input", function () {
+        setPlaybackFps(fpsInput.value);
+      });
     }
 
     syncModeUi();
@@ -1277,48 +1744,61 @@
     resizeCanvasAndViewport();
 
     var startTime = performance.now();
+    var selection = currentVizSelection;
+    var renderVolumePass = selection === "iso" || selectionShowsVolume(selection);
+    var renderBallstickPass = selectionShowsBallstick(selection) && !!moleculeState.scene;
+    var didRenderVolume = false;
 
-    if (renderMode === "ballstick") {
+    if (renderBallstickPass) {
       advancePlayback(startTime);
-      renderMoleculeScene();
+    }
 
-      if (takeScreenShot) {
-        takeScreenShot = false;
-        canvas.toBlob(function (blob) {
-          saveAs(blob, "screen.png");
-        }, "image/png");
+    if (renderVolumePass && shader) {
+      gl.disable(gl.DEPTH_TEST);
+      gl.enable(gl.CULL_FACE);
+      gl.cullFace(gl.FRONT);
+      gl.disable(gl.BLEND);
+
+      gl.clearColor(0.0, 0.0, 0.0, 1.0);
+      gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+
+      if (newVolumeUpload) {
+        if (renderBallstickPass && camera) {
+          volumeCamera = camera;
+        } else if (typeof window.fitCameraToVolume === "function") {
+          window.fitCameraToVolume();
+          syncCachedCameras();
+        } else {
+          camera = new ArcballCamera(defaultEye, center, up, 2, [WIDTH, HEIGHT]);
+          syncCachedCameras();
+        }
+        samplingRate = 1.0;
       }
-      return;
+
+      shader.use(gl);
+
+      if (shader.uniforms["dt_scale"]) gl.uniform1f(shader.uniforms["dt_scale"], getEffectiveDtScale());
+
+      projView = mat4.create();
+      projView = mat4.mul(projView, proj, camera.camera);
+      if (shader.uniforms["proj_view"]) gl.uniformMatrix4fv(shader.uniforms["proj_view"], false, projView);
+
+      var eye = [camera.invCamera[12], camera.invCamera[13], camera.invCamera[14]];
+      if (shader.uniforms["eye_pos"]) gl.uniform3fv(shader.uniforms["eye_pos"], eye);
+
+      gl.bindVertexArray(vao);
+      gl.drawArrays(gl.TRIANGLE_STRIP, 0, cubeStrip.length / 3);
+      didRenderVolume = true;
+    } else {
+      gl.clearColor(0.0, 0.0, 0.0, 1.0);
+      gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
     }
 
-    if (!shader) return;
-
-    gl.disable(gl.DEPTH_TEST);
-    gl.enable(gl.CULL_FACE);
-    gl.cullFace(gl.FRONT);
-    gl.disable(gl.BLEND);
-
-    gl.clearColor(0.0, 0.0, 0.0, 1.0);
-    gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
-
-    if (newVolumeUpload) {
-      camera = new ArcballCamera(defaultEye, center, up, 2, [WIDTH, HEIGHT]);
-      samplingRate = 1.0;
+    if (renderBallstickPass) {
+      renderMoleculeScene({
+        overlay: didRenderVolume,
+      });
     }
-
-    shader.use(gl);
-
-    if (shader.uniforms["dt_scale"]) gl.uniform1f(shader.uniforms["dt_scale"], getEffectiveDtScale());
-
-    projView = mat4.create();
-    projView = mat4.mul(projView, proj, camera.camera);
-    if (shader.uniforms["proj_view"]) gl.uniformMatrix4fv(shader.uniforms["proj_view"], false, projView);
-
-    var eye = [camera.invCamera[12], camera.invCamera[13], camera.invCamera[14]];
-    if (shader.uniforms["eye_pos"]) gl.uniform3fv(shader.uniforms["eye_pos"], eye);
-
-    gl.bindVertexArray(vao);
-    gl.drawArrays(gl.TRIANGLE_STRIP, 0, cubeStrip.length / 3);
 
     var renderTime = performance.now() - startTime;
     var targetSamplingRate = renderTime / targetFrameTime;
@@ -1330,7 +1810,7 @@
       }, "image/png");
     }
 
-    if (!newVolumeUpload && targetSamplingRate > samplingRate) {
+    if (didRenderVolume && !newVolumeUpload && targetSamplingRate > samplingRate) {
       samplingRate = 0.8 * samplingRate + 0.2 * targetSamplingRate;
       if (shader.uniforms["dt_scale"]) gl.uniform1f(shader.uniforms["dt_scale"], getEffectiveDtScale());
     }
@@ -1340,6 +1820,7 @@
 
   var originalUploadVolumeToGPU = uploadVolumeToGPU;
   uploadVolumeToGPU = function (vol) {
+    volumeCamera = null;
     originalUploadVolumeToGPU(vol);
     syncModeUi();
   };
@@ -1349,12 +1830,17 @@
     var scene = normalizeMoleculeScene(input);
     if (!scene) {
       alert("Unable to load molecule scene.");
-      return;
+      return false;
+    }
+
+    if (!scene.label && opts.label) {
+      scene.label = String(opts.label);
     }
 
     ensureMoleculeRenderer();
 
     moleculeState.scene = scene;
+    moleculeState.sourceKey = typeof opts.sourceKey === "string" ? opts.sourceKey : "";
     moleculeState.frameIndex = 0;
     moleculeState.playing = false;
     moleculeState.lastAdvanceAt = 0;
@@ -1367,24 +1853,55 @@
     }
 
     if (opts.autoEnterMode === false) {
+      pendingBallstickSelection = "";
       syncModeUi();
     } else {
-      setVisualizationMode("ballstick", { force: true });
+      setVisualizationMode(
+        opts.visualizationMode || pendingBallstickSelection || "ballstick",
+        {
+          force: true,
+          preserveBallstickCamera: !!opts.preserveCamera,
+        }
+      );
     }
 
     if (!renderLoopStarted) {
       renderLoopStarted = true;
       setInterval(renderFrame, targetFrameTime);
     }
+
+    return true;
   };
 
-  window.loadMoleculeSceneFromUrl = function (url) {
-    if (!url) {
-      alert("Missing molecule scene URL.");
-      return;
+  window.loadMoleculeSceneFromXml = function (xmlText, options) {
+    var opts = options || {};
+    if (!xmlText) {
+      alert("Missing molecule scene XML.");
+      return null;
     }
 
-    fetch(url)
+    var scene = parsePubChemXmlScene(xmlText, {
+      label: opts.label || "Molecule",
+    });
+    return window.loadMoleculeScene(scene, {
+      autoEnterMode: opts.autoEnterMode,
+      label: opts.label,
+      preserveCamera: opts.preserveCamera,
+      sourceKey: typeof opts.sourceKey === "string" && opts.sourceKey ? opts.sourceKey : "inline_xml:" + xmlText,
+      visualizationMode: opts.visualizationMode,
+    });
+  };
+
+  window.loadMoleculeSceneFromUrl = function (url, options) {
+    var opts = options || {};
+    if (!url) {
+      if (!opts.silentErrors) {
+        alert("Missing molecule scene URL.");
+      }
+      return Promise.resolve(null);
+    }
+
+    return fetch(url)
       .then(function (response) {
         if (!response.ok) {
           throw new Error("Failed to load molecule scene.");
@@ -1394,16 +1911,25 @@
         return isXml
           ? response.text().then(function (xmlText) {
               return parsePubChemXmlScene(xmlText, {
-                label: url.split("/").pop().replace(/\.xml$/i, "") || "Molecule",
+                label: opts.label || url.split("/").pop().replace(/\.xml$/i, "") || "Molecule",
               });
             })
           : response.json();
       })
       .then(function (data) {
-        window.loadMoleculeScene(data);
+        return window.loadMoleculeScene(data, {
+          autoEnterMode: opts.autoEnterMode,
+          label: opts.label,
+          preserveCamera: opts.preserveCamera,
+          sourceKey: typeof opts.sourceKey === "string" && opts.sourceKey ? opts.sourceKey : "url:" + url,
+          visualizationMode: opts.visualizationMode,
+        });
       })
       .catch(function (err) {
-        alert(err && err.message ? err.message : "Unable to load molecule scene.");
+        if (!opts.silentErrors) {
+          alert(err && err.message ? err.message : "Unable to load molecule scene.");
+        }
+        throw err;
       });
   };
 

@@ -14,7 +14,8 @@ out vec3 vray_dir;
 flat out vec3 transformed_eye;
 
 void main(void) {
-    vec3 volume_translation = vec3(0.5) - volume_scale * 0.5;
+    // The current density.bin format describes a box centered at the origin.
+    vec3 volume_translation = -volume_scale * 0.5;
     gl_Position = proj_view * vec4(pos * volume_scale + volume_translation, 1.0);
     transformed_eye = (eye_pos - volume_translation) / volume_scale;
     vray_dir = pos - transformed_eye;

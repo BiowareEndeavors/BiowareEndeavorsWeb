@@ -24,8 +24,9 @@
       </h1>
 
       <p class="subhead">
-        Submit a molecule, run a point solve, and visualize electron density directly in the web app.
-        Electronic structure will be calculated using our custom built DFT software ran on a cluster of GPUs in the cloud. 
+        Submit a molecule, run GPU-accelerated DFT workflows, and inspect energies,
+        optimized structures, molecular dynamics, and electron density directly in the browser.
+        Insight runs custom electronic-structure software on cloud GPU nodes so you can move from setup to results without local HPC infrastructure.
       </p>
 
       <!-- Optional image area (drop in later) -->
@@ -35,74 +36,104 @@
 
       <div class="grid-2">
         <div class="info-card">
-          <div class="info-title">Benchmarks</div>
-          <div class="info-sub">Wall times and point solve costs for def2-SVP, r2SCAN calculations ran on 2 H200 GPUs</div>
+          <div class="info-title">Energy comparison</div>
+          <div class="info-sub">Total energy comparison against Psi4 using the r2SCAN functional and def2-SVP basis set.</div>
 
-          <div class="bench-list">
-            <div class="bench-row">
-              <div class="bench-name">Aspirin</div>
-              <div class="bench-meta">21 Atoms</div>
-              <div class="bench-time">3.1s</div>
-              <div class="bench-cost">$0.16</div>
-            </div>
-            <div class="bench-row">
-              <div class="bench-name">Caffeine</div>
-              <div class="bench-meta">24 Atoms</div>
-              <div class="bench-time">3.1s</div>
-              <div class="bench-cost">$0.15</div>
-            </div>
-            <div class="bench-row">
-              <div class="bench-name">Nicotine</div>
-              <div class="bench-meta">26 Atoms</div>
-              <div class="bench-time">3.6s</div>
-              <div class="bench-cost">$0.16</div>
-            </div>
-            <div class="bench-row">
-              <div class="bench-name">Morphine</div>
-              <div class="bench-meta">40 Atoms</div>
-              <div class="bench-time">5.2s</div>
-              <div class="bench-cost">$0.16</div>
-            </div>
-            <div class="bench-row">
-              <div class="bench-name">Penicillin</div>
-              <div class="bench-meta">41 Atoms</div>
-              <div class="bench-time">6.0s</div>
-              <div class="bench-cost">$0.16</div>
-            </div>
-            <div class="bench-row">
-              <div class="bench-name">Testosterone</div>
-              <div class="bench-meta">49 Atoms</div>
-              <div class="bench-time">5.4s</div>
-              <div class="bench-cost">$0.15</div>
-            </div>
-            <div class="bench-row">
-              <div class="bench-name">VitaminD3</div>
-              <div class="bench-meta">72 Atoms</div>
-              <div class="bench-time">9.0s</div>
-              <div class="bench-cost">$0.16</div>
-            </div>
-            <div class="bench-row">
-              <div class="bench-name">Remdesivir</div>
-              <div class="bench-meta">77 Atoms</div>
-              <div class="bench-time">14.2s</div>
-              <div class="bench-cost">$0.34</div>
-            </div>
-            <div class="bench-row">
-              <div class="bench-name">VitaminK</div>
-              <div class="bench-meta">79 Atoms</div>
-              <div class="bench-time">18.5s</div>
-              <div class="bench-cost">$0.31</div>
-            </div>
-            <div class="bench-row">
-              <div class="bench-name">VitaminE</div>
-              <div class="bench-meta">81 Atoms</div>
-              <div class="bench-time">11.3s</div>
-              <div class="bench-cost">$0.20</div>
-            </div>
+          <div class="energy-table-wrap" aria-label="Psi4 and Insight total energy comparison">
+            <table class="energy-table">
+              <thead>
+                <tr>
+                  <th scope="col">Molecule</th>
+                  <th scope="col">Psi4</th>
+                  <th scope="col">Insight</th>
+                  <th scope="col">Error</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <th scope="row">CO2</th>
+                  <td>-188.348064463936</td>
+                  <td>-188.347975628799</td>
+                  <td>0.000047%</td>
+                </tr>
+                <tr>
+                  <th scope="row">Acetone</th>
+                  <td>-192.893916221030</td>
+                  <td>-192.893890989144</td>
+                  <td>0.000013%</td>
+                </tr>
+                <tr>
+                  <th scope="row">Aspirin</th>
+                  <td>-647.872239176291</td>
+                  <td>-647.872027367449</td>
+                  <td>0.000033%</td>
+                </tr>
+                <tr>
+                  <th scope="row">Caffeine</th>
+                  <td>-679.519404072613</td>
+                  <td>-679.519148386103</td>
+                  <td>0.000038%</td>
+                </tr>
+                <tr>
+                  <th scope="row">Nicotine</th>
+                  <td>-498.319170569034</td>
+                  <td>-498.319180328738</td>
+                  <td>0.000002%</td>
+                </tr>
+                <tr>
+                  <th scope="row">Morphine</th>
+                  <td>-938.428502745943</td>
+                  <td>-938.428406909165</td>
+                  <td>0.000010%</td>
+                </tr>
+                <tr>
+                  <th scope="row">Penicillin</th>
+                  <td>-1427.684967139940</td>
+                  <td>-1427.684698343900</td>
+                  <td>0.000019%</td>
+                </tr>
+                <tr>
+                  <th scope="row">Remdesivir</th>
+                  <td>-2318.942206176700</td>
+                  <td>-2318.941716913850</td>
+                  <td>0.000021%</td>
+                </tr>
+                <tr>
+                  <th scope="row">Testosterone</th>
+                  <td>-890.174471556306</td>
+                  <td>-890.174557704175</td>
+                  <td>0.000010%</td>
+                </tr>
+                <tr>
+                  <th scope="row">VitA</th>
+                  <td>-854.211980316497</td>
+                  <td>-854.211428415530</td>
+                  <td>0.000065%</td>
+                </tr>
+                <tr>
+                  <th scope="row">VitD3</th>
+                  <td>-1129.052943728480</td>
+                  <td>-1129.053100993590</td>
+                  <td>0.000014%</td>
+                </tr>
+                <tr>
+                  <th scope="row">VitK</th>
+                  <td>-1357.666469150910</td>
+                  <td>-1357.666344115740</td>
+                  <td>0.000009%</td>
+                </tr>
+                <tr>
+                  <th scope="row">VitE</th>
+                  <td>-1283.980929308280</td>
+                  <td>-1283.981155853020</td>
+                  <td>0.000018%</td>
+                </tr>
+              </tbody>
+            </table>
           </div>
 
           <div class="fineprint">
-            Metrics will vary depending on hardware assigned to your job. H200 GPUs are the fastest, but most expensive hardware available. 
+            Energies are reported in Hartree. Error is the relative difference from Psi4.
           </div>
         </div>
 
@@ -111,6 +142,8 @@
           <ul class="bullets">
             <li>Stress tested on systems up to 100 atoms</li>
             <li>Point solves (KS-DFT) using def2-SVP and r2SCAN</li>
+            <li>Geometry Optimization</li>
+            <li>Born-Oppenheimer Molecular Dynamics</li>
             <li>Density visualization (volume + isosurface)</li>
             <li>Web-first workflow</li>
           </ul>
@@ -121,8 +154,6 @@
           <ul class="bullets muted">
             <li>More basis function and Exc functional options</li>
             <li>Linearly scaling computation on large systems</li>
-            <li>Forces</li>
-            <li>Geometry optimization</li>
             <li>Better reporting/export (energies, orbitals, density grids, etc.)</li>
             <li>ML Accelerated QMMD</li>
             <li>Excited States</li>

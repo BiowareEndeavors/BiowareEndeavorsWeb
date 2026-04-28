@@ -56,8 +56,8 @@ var targetFrameTime = 32;
 var WIDTH = 640;
 var HEIGHT = 480;
 
-const defaultEye = vec3.set(vec3.create(), 0.5, 0.5, 1.5);
-const center = vec3.set(vec3.create(), 0.5, 0.5, 0.5);
+const defaultEye = vec3.set(vec3.create(), 0.0, 0.0, 6.0);
+const center = vec3.set(vec3.create(), 0.0, 0.0, 0.0);
 const up = vec3.set(vec3.create(), 0.0, 1.0, 0.0);
 
 // ---- UI catalogs ----
@@ -93,8 +93,8 @@ var uiState = {
 
   // volume alpha shaping
   vol_alpha_lo: 0.05,
-  vol_alpha_hi: 0.35,
-  opacity_strength: 1.0,
+  vol_alpha_hi: 0.3,
+  opacity_strength: 0.3,
 
   // iso threshold (RAW density units from your domain)
   iso_value: 0.05
@@ -103,6 +103,8 @@ var uiState = {
 // track last volume uniforms so shader switches re-apply cleanly
 var lastVolumeDims = null;
 var lastVolumeScale = null;
+var lastVolumeRadius = 1.0;
+var lastVolumeFitRadius = 1.0;
 
 // GL objects we need to keep on shader swap
 var vao = null;
@@ -112,6 +114,64 @@ var renderLoopStarted = false;
 function getEffectiveDtScale() {
   return Math.max(0.0001, uiState.dt_scale * samplingRate);
 }
+
+function computeVolumeWorldScale(vol) {
+  var dims = Array.isArray(vol && vol.dims) ? vol.dims : [1, 1, 1];
+  var voxelSize = Math.abs(Number(vol && vol.voxelSize) || 0);
+  if (!(voxelSize > 0.0)) voxelSize = 1.0;
+
+  return [
+    Math.max(1, Number(dims[0]) || 1) * voxelSize,
+    Math.max(1, Number(dims[1]) || 1) * voxelSize,
+    Math.max(1, Number(dims[2]) || 1) * voxelSize,
+  ];
+}
+
+function computeVolumeWorldRadius(scale) {
+  if (!scale || scale.length < 3) return 1.0;
+  var sx = Number(scale[0]) || 0;
+  var sy = Number(scale[1]) || 0;
+  var sz = Number(scale[2]) || 0;
+  var radius = 0.5 * Math.sqrt(sx * sx + sy * sy + sz * sz);
+  return radius > 0.0 ? radius : 1.0;
+}
+
+function computeVolumeFitRadius(scale) {
+  if (!scale || scale.length < 3) return 1.0;
+  var sx = Math.abs(Number(scale[0]) || 0);
+  var sy = Math.abs(Number(scale[1]) || 0);
+  var sz = Math.abs(Number(scale[2]) || 0);
+  var radius = 0.5 * Math.max(sx, Math.max(sy, sz));
+  return radius > 0.0 ? radius : 1.0;
+}
+
+function fitCameraToVolume() {
+  var fitRadius = lastVolumeFitRadius > 0.0 ? lastVolumeFitRadius : 1.0;
+  var eye = vec3.set(
+    vec3.create(),
+    center[0],
+    center[1],
+    center[2] + Math.max(2.75, fitRadius * 1.45)
+  );
+  camera = new ArcballCamera(
+    eye,
+    center,
+    up,
+    Math.max(0.9, fitRadius * 0.85),
+    [Math.max(1, WIDTH), Math.max(1, HEIGHT)]
+  );
+}
+
+window.fitCameraToVolume = fitCameraToVolume;
+
+window.getVolumeSceneMetrics = function () {
+  if (!lastVolumeScale) return null;
+  return {
+    center: [center[0], center[1], center[2]],
+    radius: lastVolumeRadius,
+    scale: lastVolumeScale.slice(),
+  };
+};
 
 // RAW rho -> mapped unit [0,1] (matches CUDA packing)
 function rhoToUnit(rho) {
@@ -145,7 +205,15 @@ function resizeCanvasAndViewport() {
   WIDTH = canvas.width;
   HEIGHT = canvas.height;
 
-  proj = mat4.perspective(mat4.create(), 60 * Math.PI / 180.0, WIDTH / HEIGHT, 0.1, 100);
+  var metrics = window.getVolumeSceneMetrics ? window.getVolumeSceneMetrics() : null;
+  var near = 0.1;
+  var far = 100.0;
+  if (metrics && metrics.radius > 0.0) {
+    near = Math.max(0.05, metrics.radius * 0.02);
+    far = Math.max(100.0, metrics.radius * 12.0);
+  }
+
+  proj = mat4.perspective(mat4.create(), 60 * Math.PI / 180.0, WIDTH / HEIGHT, near, far);
 
   if (camera && typeof camera.setBounds === "function") {
     camera.setBounds([WIDTH, HEIGHT]);
@@ -158,6 +226,9 @@ function resizeCanvasAndViewport() {
 
 function applyUniformsFromUI() {
   if (!gl || !shader || !shader.uniforms) return;
+  if (typeof shader.use === "function") {
+    shader.use(gl);
+  }
 
   // shared between both shaders
   if (shader.uniforms["dt_scale"]) gl.uniform1f(shader.uniforms["dt_scale"], getEffectiveDtScale());
@@ -468,11 +539,12 @@ function uploadVolumeToGPU(vol) {
     vol.dataU8
   );
 
-  var longestAxis = Math.max(volDims[0], Math.max(volDims[1], volDims[2]));
-  var volScale = [volDims[0] / longestAxis, volDims[1] / longestAxis, volDims[2] / longestAxis];
+  var volScale = computeVolumeWorldScale(vol);
 
   lastVolumeDims = volDims;
   lastVolumeScale = volScale;
+  lastVolumeRadius = computeVolumeWorldRadius(volScale);
+  lastVolumeFitRadius = computeVolumeFitRadius(volScale);
 
   if (shader.uniforms["volume_dims"]) gl.uniform3iv(shader.uniforms["volume_dims"], volDims);
   if (shader.uniforms["volume_scale"]) gl.uniform3fv(shader.uniforms["volume_scale"], volScale);
@@ -529,7 +601,7 @@ function renderFrame() {
   gl.clear(gl.COLOR_BUFFER_BIT);
 
   if (newVolumeUpload) {
-    camera = new ArcballCamera(defaultEye, center, up, 2, [WIDTH, HEIGHT]);
+    fitCameraToVolume();
     samplingRate = 1.0;
   }
 

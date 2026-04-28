@@ -1,6 +1,7 @@
 // /src/molecule-drop.js
 //
 // Drag-and-drop XML -> extract PC sections -> call Firebase callable submit_molecule.
+// Drag-and-drop MD frames JSON -> open local trajectory playback.
 //
 // Expects these elements in DOM:
 //   #dropOverlay
@@ -9,22 +10,15 @@
 //
 // Uses existing Firebase app/auth from /src/firebase-init.js
 
-import { auth, app } from "/src/firebase-init.js";
+import { auth, getInsightFunctions } from "/src/firebase-init.js";
 import { onAuthStateChanged } from "https://www.gstatic.com/firebasejs/12.8.0/firebase-auth.js";
-import {
-  connectFunctionsEmulator,
-  getFunctions,
-  httpsCallable,
-} from "https://www.gstatic.com/firebasejs/12.8.0/firebase-functions.js";
+import { httpsCallable } from "https://www.gstatic.com/firebasejs/12.8.0/firebase-functions.js";
 
 // -----------------------------
 // Config
 // -----------------------------
 const FUNCTIONS_REGION = "us-central1";
 const FUNCTION_NAME = "submit_molecule";
-const LOCAL_FUNCTIONS_HOST = "127.0.0.1";
-const LOCAL_FUNCTIONS_PORT = 5001;
-let didConnectFunctionsEmulator = false;
 
 // Required structure (client-side preflight only; server is source of truth)
 const REQUIRED = [
@@ -106,7 +100,7 @@ onAuthStateChanged(auth, (user) => {
     setStatus("Not signed in. Redirecting to /auth...");
     window.location.href = "/auth";
   } else {
-    setStatus("Signed in. Drop an XML file.");
+    setStatus("Signed in. Drop an XML file or MD frames JSON.");
   }
 });
 
@@ -157,6 +151,111 @@ function wrapMoleculeXml(atomsEl, xEl, yEl, zEl) {
   return minifyXml(`<PC-Compounds>${atoms}${x}${y}${z}</PC-Compounds>`);
 }
 
+function escapeXmlText(value) {
+  return String(value ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
+}
+
+function formatXmlNumber(value) {
+  const number = Number(value);
+  return Number.isFinite(number) ? String(number) : "0";
+}
+
+function extractMdInitialVelocityXml(root, atomCount) {
+  const velocityUnitsEl = findFirstByLocalName(root, "VelocityUnits");
+  const velocityXEl = findFirstByLocalName(root, "VelocityX");
+  const velocityYEl = findFirstByLocalName(root, "VelocityY");
+  const velocityZEl = findFirstByLocalName(root, "VelocityZ");
+  const hasAnyVelocity = Boolean(velocityXEl || velocityYEl || velocityZEl);
+
+  if (!hasAnyVelocity) return "";
+  if (!velocityXEl || !velocityYEl || !velocityZEl) {
+    throw new Error("InsightMD initial velocities must include VelocityX, VelocityY, and VelocityZ.");
+  }
+
+  const velocityComponents = [
+    { tag: "VelocityX", element: velocityXEl, entry: "VelocityX_E" },
+    { tag: "VelocityY", element: velocityYEl, entry: "VelocityY_E" },
+    { tag: "VelocityZ", element: velocityZEl, entry: "VelocityZ_E" },
+  ];
+
+  for (const component of velocityComponents) {
+    const count = childrenByLocalName(component.element, component.entry).length;
+    if (count !== atomCount) {
+      throw new Error(
+        `${component.tag} must contain ${atomCount} <${component.entry}> values.`
+      );
+    }
+  }
+
+  const ser = new XMLSerializer();
+  return [
+    velocityUnitsEl ? ser.serializeToString(velocityUnitsEl) : "",
+    ser.serializeToString(velocityXEl),
+    ser.serializeToString(velocityYEl),
+    ser.serializeToString(velocityZEl),
+  ]
+    .filter(Boolean)
+    .join("");
+}
+
+function buildMolecularDynamicsXml(moleculeXml, mdConfig) {
+  const parser = new DOMParser();
+  const doc = parser.parseFromString(moleculeXml, "application/xml");
+  const pe = doc.getElementsByTagName("parsererror");
+  if (pe && pe.length) throw new Error("Unable to build MD XML: molecule XML parse error.");
+
+  const atomsEl = findFirstByLocalName(doc, "PC-Atoms_element");
+  const xEl = findFirstByLocalName(doc, "PC-Conformer_x");
+  const yEl = findFirstByLocalName(doc, "PC-Conformer_y");
+  const zEl = findFirstByLocalName(doc, "PC-Conformer_z");
+
+  if (!atomsEl || !xEl || !yEl || !zEl) {
+    throw new Error("Unable to build MD XML: missing atom or coordinate tags.");
+  }
+
+  const ser = new XMLSerializer();
+  const atoms = ser.serializeToString(atomsEl);
+  const x = ser.serializeToString(xEl);
+  const y = ser.serializeToString(yEl);
+  const z = ser.serializeToString(zEl);
+  const stepCount = Math.max(1, Math.trunc(Number(mdConfig?.step_count) || 5));
+  const timeStepFs = Number(mdConfig?.time_step_fs) || 0.25;
+  const trajectoryFile = mdConfig?.trajectory_file || "md_trajectory.json";
+  const initialVelocityXml = String(mdConfig?.initial_velocity_xml || "").trim();
+
+  return minifyXml(`<?xml version="1.0"?>
+<PC-Compounds xmlns="http://www.ncbi.nlm.nih.gov">
+  <PC-Compound>
+    <PC-Compound_atoms>
+      <PC-Atoms>
+        ${atoms}
+      </PC-Atoms>
+    </PC-Compound_atoms>
+    <PC-Compound_coords>
+      <PC-Coordinates>
+        <PC-Coordinates_conformers>
+          <PC-Conformer>
+            ${x}
+            ${y}
+            ${z}
+          </PC-Conformer>
+        </PC-Coordinates_conformers>
+      </PC-Coordinates>
+    </PC-Compound_coords>
+    <InsightMD>
+      <SchemaVersion>1</SchemaVersion>
+      <StepCount>${stepCount}</StepCount>
+      <TimeStepFs>${formatXmlNumber(timeStepFs)}</TimeStepFs>
+      <TrajectoryFile>${escapeXmlText(trajectoryFile)}</TrajectoryFile>
+      ${initialVelocityXml}
+    </InsightMD>
+  </PC-Compound>
+</PC-Compounds>`);
+}
+
 // Client-side preflight validation + extraction.
 // Server still validates; this is for UX and smaller payload.
 function extractMoleculeXml(xmlText) {
@@ -188,8 +287,11 @@ function extractMoleculeXml(xmlText) {
     }
   }
 
+  const mdInitialVelocityXml = extractMdInitialVelocityXml(doc, n);
+
   return {
     nAtoms: n,
+    mdInitialVelocityXml,
     moleculeXml: wrapMoleculeXml(
       found["PC-Atoms_element"].el,
       found["PC-Conformer_x"].el,
@@ -204,26 +306,207 @@ function isXmlFile(file) {
   return name.endsWith(".xml") || file.type === "text/xml" || file.type === "application/xml";
 }
 
+function isJsonFile(file) {
+  const name = (file?.name || "").toLowerCase();
+  const type = String(file?.type || "").toLowerCase();
+  return name.endsWith(".json") || type === "application/json" || type === "text/json";
+}
+
+function stripKnownExtension(name) {
+  return String(name || "")
+    .trim()
+    .replace(/\.(json|xml)$/i, "");
+}
+
+function toFlatNumberArray(values) {
+  if (ArrayBuffer.isView(values)) return Array.from(values, (value) => Number(value) || 0);
+  if (Array.isArray(values)) return values.map((value) => Number(value) || 0);
+  return [];
+}
+
+function findNestedObjectByKey(root, targetKey) {
+  if (!root || typeof root !== "object") return null;
+
+  const seen = new Set();
+  const stack = [root];
+  let visitedCount = 0;
+
+  while (stack.length && visitedCount < 1000) {
+    const current = stack.pop();
+    if (!current || typeof current !== "object" || seen.has(current)) continue;
+
+    seen.add(current);
+    visitedCount += 1;
+
+    const directValue = current?.[targetKey];
+    if (directValue && typeof directValue === "object") return directValue;
+
+    if (Array.isArray(current)) {
+      for (let i = Math.min(current.length - 1, 20); i >= 0; i -= 1) {
+        stack.push(current[i]);
+      }
+      continue;
+    }
+
+    for (const [key, value] of Object.entries(current)) {
+      if (
+        key === "frames" ||
+        key === "positions" ||
+        key === "velocities" ||
+        key === "forces" ||
+        key === "gradients"
+      ) {
+        continue;
+      }
+      stack.push(value);
+    }
+  }
+
+  return null;
+}
+
+function getDroppedMdObject(root) {
+  if (!root || typeof root !== "object") return null;
+
+  const directCandidates = [
+    root.MolecularDynamics,
+    root.result?.MolecularDynamics,
+    root.output?.MolecularDynamics,
+    root.partialResult?.MolecularDynamics,
+    root.data?.MolecularDynamics,
+    root.response?.MolecularDynamics,
+  ];
+
+  for (const candidate of directCandidates) {
+    if (candidate && typeof candidate === "object" && !Array.isArray(candidate)) {
+      return candidate;
+    }
+  }
+
+  if (Array.isArray(root.frames)) return root;
+
+  const nested = findNestedObjectByKey(root, "MolecularDynamics");
+  if (nested && typeof nested === "object" && !Array.isArray(nested)) return nested;
+
+  return null;
+}
+
+function getDroppedMdAtomicNumbers(md) {
+  const values = md?.atomicNumbers || md?.atomic_numbers || md?.elements || md?.z;
+  if (Array.isArray(values) || ArrayBuffer.isView(values)) {
+    return toFlatNumberArray(values)
+      .map((value) => Math.max(1, Math.trunc(value)))
+      .filter((value) => value > 0);
+  }
+
+  if (Array.isArray(md?.atoms)) {
+    return md.atoms
+      .map((atom) => atom?.atomicNumber ?? atom?.atomic_number ?? atom?.Z ?? atom?.element ?? atom?.number)
+      .map((value) => Math.max(1, Math.trunc(Number(value) || 0)))
+      .filter((value) => value > 0);
+  }
+
+  return [];
+}
+
+function getDroppedMdFrameAtomCount(frame) {
+  if (!frame) return 0;
+  if (Array.isArray(frame?.atoms)) return frame.atoms.length;
+
+  const positions = toFlatNumberArray(frame?.positions || frame?.coordinates || frame?.xyz || frame);
+  if (positions.length >= 3 && positions.length % 3 === 0) return positions.length / 3;
+
+  const xs = toFlatNumberArray(frame?.x);
+  const ys = toFlatNumberArray(frame?.y);
+  const zs = toFlatNumberArray(frame?.z);
+  if (xs.length && xs.length === ys.length && ys.length === zs.length) return xs.length;
+
+  return 0;
+}
+
+function buildDroppedMdScenePayload(root, fileName) {
+  const md = getDroppedMdObject(root);
+  if (!md || typeof md !== "object") {
+    throw new Error("JSON does not contain a MolecularDynamics payload.");
+  }
+
+  const frames = Array.isArray(md.frames) ? md.frames : [];
+  if (!frames.length) {
+    throw new Error("MolecularDynamics payload does not contain any frames.");
+  }
+
+  const label = stripKnownExtension(fileName) || md.label || root?.label || "MD Trajectory";
+  const normalizedMd = {
+    ...md,
+    label,
+  };
+
+  const atomicNumbers = getDroppedMdAtomicNumbers(normalizedMd);
+  if (!atomicNumbers.length) {
+    const atomCount =
+      Math.max(0, Math.trunc(Number(normalizedMd.atomCount ?? normalizedMd.atom_count) || 0)) ||
+      getDroppedMdFrameAtomCount(frames[0]);
+    if (!atomCount) {
+      throw new Error("MolecularDynamics payload is missing atomic numbers.");
+    }
+    normalizedMd.atomicNumbers = Array.from({ length: atomCount }, () => 6);
+    normalizedMd.atomElementsAssumed = true;
+  }
+
+  return {
+    label,
+    MolecularDynamics: normalizedMd,
+  };
+}
+
+async function handleMdFramesFile(file) {
+  setStatus(`Reading ${file.name}...`);
+
+  let data;
+  try {
+    data = JSON.parse(await file.text());
+  } catch (_) {
+    setStatus("Invalid JSON.");
+    return;
+  }
+
+  let scenePayload;
+  try {
+    scenePayload = buildDroppedMdScenePayload(data, file.name);
+  } catch (err) {
+    setStatus(`Invalid MD frames JSON: ${err?.message || String(err)}`);
+    return;
+  }
+
+  if (typeof window.loadMoleculeScene !== "function") {
+    setStatus("Renderer not initialized yet.");
+    return;
+  }
+
+  const loaded = window.loadMoleculeScene(scenePayload, {
+    autoEnterMode: true,
+    label: scenePayload.label,
+    sourceKey: `local_md_frames:${file.name}:${file.size}:${file.lastModified || 0}`,
+    visualizationMode: "ballstick",
+  });
+
+  if (!loaded) {
+    setStatus("Unable to open MD visualization.");
+    return;
+  }
+
+  window.lastDroppedMdFramesPayload = scenePayload;
+  const frameCount = scenePayload.MolecularDynamics.frames.length;
+  const atomCount =
+    getDroppedMdAtomicNumbers(scenePayload.MolecularDynamics).length ||
+    getDroppedMdFrameAtomCount(scenePayload.MolecularDynamics.frames[0]);
+  setStatus(`Loaded ${file.name} (${frameCount} frames, ${atomCount} atoms).`);
+}
+
 // -----------------------------
 // Firebase callable
 // -----------------------------
-function getLocalAwareFunctions(region = FUNCTIONS_REGION) {
-  const functions = getFunctions(app, region);
-  const host = typeof window === "undefined" ? "" : window.location.hostname || "";
-  const isLocalHost = host === "127.0.0.1" || host === "localhost";
-
-  if (isLocalHost && !didConnectFunctionsEmulator) {
-    connectFunctionsEmulator(functions, LOCAL_FUNCTIONS_HOST, LOCAL_FUNCTIONS_PORT);
-    didConnectFunctionsEmulator = true;
-    console.info(
-      `[firebase] Using local Functions emulator at ${LOCAL_FUNCTIONS_HOST}:${LOCAL_FUNCTIONS_PORT} (${region})`
-    );
-  }
-
-  return functions;
-}
-
-const functions = getLocalAwareFunctions(FUNCTIONS_REGION);
+const functions = getInsightFunctions(FUNCTIONS_REGION);
 
 if (auth.currentUser) console.log("uid:", auth.currentUser.uid);
 const submitCallable = httpsCallable(functions, FUNCTION_NAME);
@@ -270,8 +553,13 @@ async function submitMolecule(moleculeXml, fileName, extra = {}) {
 async function handleFile(file) {
   if (!file) return;
 
+  if (isJsonFile(file)) {
+    await handleMdFramesFile(file);
+    return;
+  }
+
   if (!isXmlFile(file)) {
-    setStatus("Drop an .xml file.");
+    setStatus("Drop an .xml file or MD frames .json file.");
     return;
   }
 
@@ -287,7 +575,9 @@ async function handleFile(file) {
     return;
   }
 
-  setStatus(`Validated (${extracted.nAtoms} atoms). Configure job...`);
+  setStatus(
+    `Validated (${extracted.nAtoms} atoms${extracted.mdInitialVelocityXml ? ", with initial MD velocities" : ""}). Configure job...`
+  );
 
   if (typeof window.openSubmitModal !== "function") {
     setStatus("UI error: submit modal not loaded.");
@@ -297,14 +587,26 @@ async function handleFile(file) {
   window.openSubmitModal({
     fileName: file.name,
     nAtoms: extracted.nAtoms,
+    mdInitialVelocityXml: extracted.mdInitialVelocityXml,
     moleculeXml: extracted.moleculeXml,
-    onSubmit: async ({ mode, nickname, hardware_tier, max_runtime_sec, moleculeXml, fileName }) => {
+    onSubmit: async ({ mode, nickname, hardware_tier, max_runtime_sec, moleculeXml, fileName, mdConfig }) => {
       setStatus("Submitting...");
-      const data = await submitMolecule(moleculeXml, fileName, {
+      const submissionXml = mode === "molecular_dynamics"
+        ? buildMolecularDynamicsXml(moleculeXml, mdConfig)
+        : moleculeXml;
+      const data = await submitMolecule(submissionXml, fileName, {
         mode,
         nickname,
         hardware_tier,
         max_runtime_sec,
+        ...(mdConfig
+          ? {
+              md_step_count: mdConfig.step_count,
+              md_time_step_fs: mdConfig.time_step_fs,
+              md_total_time_fs: mdConfig.total_time_fs,
+              md_trajectory_file: mdConfig.trajectory_file,
+            }
+          : {}),
       });
       console.log("submit_molecule response:", data);
       console.log("submit_molecule selected endpoint:", data?.runpod_endpoint);

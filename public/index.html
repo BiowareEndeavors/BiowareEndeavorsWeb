@@ -20,7 +20,7 @@
 
 <body>
   <div id="dropOverlay">
-    Drop .XML file to run simulation
+    Drop XML to submit or md_frames.json to visualize
   </div>
 
   <!-- Jobs modal -->
@@ -66,14 +66,16 @@
   <div id="submitOverlay" class="jobs-overlay submit-overlay" aria-hidden="true">
     <div class="jobs-modal submit-modal" role="dialog" aria-modal="true" aria-label="Submit job">
       <div class="jobs-modal__header">
-        <div class="jobs-modal__title">Submit Job</div>
+        <div class="jobs-modal__title" id="submitModalTitle">Submit Job</div>
         <div class="jobs-modal__controls">
           <button class="jobs-close-x" type="button" id="submitCloseBtn" title="Close">&times;</button>
         </div>
       </div>
 
       <div class="jobs-modal__body">
-        <div class="submit-tabs-scroller">
+        <div class="submit-context-banner" id="submitModalContext" hidden></div>
+
+        <div class="submit-tabs-scroller" id="submitTabsScroller">
           <div class="submit-tabs" role="tablist" aria-label="Job types">
             <button
               class="submit-tab is-active"
@@ -101,17 +103,16 @@
 
             <div class="submit-tab-wrap">
               <button
-                class="submit-tab submit-tab--disabled"
+                class="submit-tab"
                 type="button"
                 id="submitMolecularDynamicsTab"
+                data-submit-mode="molecular_dynamics"
                 role="tab"
                 aria-selected="false"
-                aria-disabled="true"
-                disabled
+                aria-controls="submitMolecularDynamicsPanel"
               >
                 Molecular Dynamics
               </button>
-              <span class="submit-tab-note">Coming Soon</span>
             </div>
           </div>
         </div>
@@ -394,6 +395,153 @@
               <div class="submit-hint">Optimization jobs usually need more time than point solves.</div>
             </div>
           </section>
+
+          <section
+            class="submit-tab-panel"
+            id="submitMolecularDynamicsPanel"
+            data-submit-panel="molecular_dynamics"
+            role="tabpanel"
+            aria-labelledby="submitMolecularDynamicsTab"
+            hidden
+          >
+            <div class="submit-mode-panel">
+              <div class="submit-mode-title" id="submitMolecularDynamicsModeTitle">Molecular Dynamics</div>
+              <div class="submit-hint submit-mode-description" id="submitMolecularDynamicsModeDescription">
+                Run a short molecular dynamics trajectory and return frame-by-frame nuclear coordinates for playback.
+              </div>
+            </div>
+
+            <div class="submit-section-title">Input</div>
+
+            <div class="submit-row">
+              <div class="submit-label">File</div>
+              <div class="submit-value" data-submit-bind="fileName">-</div>
+            </div>
+
+            <div class="submit-row">
+              <div class="submit-label">Atoms</div>
+              <div class="submit-value" data-submit-bind="atomCount">-</div>
+            </div>
+
+            <div class="submit-hint submit-section-hint" id="submitMolecularDynamicsInputHint">
+              MD submissions add an <code>InsightMD</code> block to the XML sent to the endpoint. If your uploaded XML includes <code>VelocityX</code>, <code>VelocityY</code>, and <code>VelocityZ</code>, those initial velocities are preserved.
+            </div>
+
+            <div class="submit-section-title">MD Settings</div>
+
+            <div class="submit-row submit-row--stack">
+              <label class="submit-label" for="submitMolecularDynamicsStepCount">Step count</label>
+              <input
+                class="submit-input"
+                id="submitMolecularDynamicsStepCount"
+                data-submit-input="mdStepCount"
+                data-default-value="5"
+                type="number"
+                min="1"
+                max="100000"
+                step="1"
+              />
+              <div class="submit-hint">Number of velocity Verlet integration steps.</div>
+            </div>
+
+            <div class="submit-row submit-row--stack">
+              <label class="submit-label" for="submitMolecularDynamicsTimeStepFs">Time step (fs)</label>
+              <input
+                class="submit-input"
+                id="submitMolecularDynamicsTimeStepFs"
+                data-submit-input="mdTimeStepFs"
+                data-default-value="0.25"
+                type="number"
+                min="0.001"
+                max="10"
+                step="0.001"
+              />
+              <div class="submit-runtime-estimate">
+                <span class="submit-runtime-estimate__label">Total simulation time</span>
+                <span class="submit-runtime-estimate__value" data-submit-bind="mdTotalTimeFs">1.25 fs</span>
+              </div>
+              <div class="submit-hint">Total simulation time is step count multiplied by time step.</div>
+            </div>
+
+            <div class="submit-section-title">Job Settings</div>
+
+            <div class="submit-row submit-row--stack">
+              <label class="submit-label" for="submitMolecularDynamicsNickname">Nickname</label>
+              <input
+                class="submit-input"
+                id="submitMolecularDynamicsNickname"
+                data-submit-input="nickname"
+                type="text"
+                autocomplete="off"
+              />
+              <div class="submit-hint">Shown in the Jobs list.</div>
+            </div>
+
+            <div class="submit-row submit-row--stack">
+              <div class="submit-row-head">
+                <div class="submit-label" id="submitMolecularDynamicsHardwareLabel">Hardware</div>
+                <div class="submit-row-caption">Longer trajectories cost more, so start small while testing.</div>
+              </div>
+              <div class="submit-hardware-picker" role="radiogroup" aria-labelledby="submitMolecularDynamicsHardwareLabel">
+                <label class="submit-hardware-option" data-submit-hardware-option data-hardware-tier="budget">
+                  <input
+                    class="submit-hardware-radio"
+                    type="radio"
+                    name="submitMolecularDynamicsHardwareTier"
+                    value="budget"
+                    data-submit-input="hardwareTier"
+                    data-default-value="budget"
+                    checked
+                  />
+                  <span class="submit-hardware-option__content">
+                    <span class="submit-hardware-option__top">
+                      <span class="submit-hardware-option__badge">Budget</span>
+                      <span class="submit-hardware-option__price">$0.002-$0.007 / s</span>
+                    </span>
+                    <span class="submit-hardware-option__gpu">RTX 5090 / RTX 4090</span>
+                    <span class="submit-hardware-option__copy">Best for small MD smoke tests and short trajectories.</span>
+                  </span>
+                </label>
+
+                <label class="submit-hardware-option" data-submit-hardware-option data-hardware-tier="performance">
+                  <input
+                    class="submit-hardware-radio"
+                    type="radio"
+                    name="submitMolecularDynamicsHardwareTier"
+                    value="performance"
+                    data-submit-input="hardwareTier"
+                  />
+                  <span class="submit-hardware-option__content">
+                    <span class="submit-hardware-option__top">
+                      <span class="submit-hardware-option__badge">Performance</span>
+                      <span class="submit-hardware-option__price">$0.01-$0.015 / s</span>
+                    </span>
+                    <span class="submit-hardware-option__gpu">H200 / H100</span>
+                    <span class="submit-hardware-option__copy">Use for larger molecules or trajectories that need faster turnaround.</span>
+                  </span>
+                </label>
+              </div>
+            </div>
+
+            <div class="submit-row submit-row--stack">
+              <label class="submit-label" for="submitMolecularDynamicsMaxRuntime">Max runtime (minutes)</label>
+              <input
+                class="submit-input"
+                id="submitMolecularDynamicsMaxRuntime"
+                data-submit-input="maxRuntime"
+                data-default-value="10"
+                type="number"
+                min="1"
+                max="180"
+                step="1"
+              />
+              <div class="submit-runtime-estimate">
+                <span class="submit-runtime-estimate__label">Estimated max cost</span>
+                <span class="submit-runtime-estimate__value" data-submit-bind="maxCost">$9.00</span>
+              </div>
+              <div class="submit-hint">MD jobs are cancelled after this limit.</div>
+            </div>
+          </section>
         </div>
 
         <div class="submit-error" id="submitError" role="alert"></div>
@@ -567,6 +715,7 @@
           <div class="molhelp-text">
             Drag-and-drop a <code class="molhelp-code">.xml</code> file anywhere on the page.
             After it is detected, the Submit Job modal will show filename and atom count.
+            You can also drop a local <code class="molhelp-code">md_frames.json</code> file to open MD playback without submitting a job.
           </div>
         </div>
       </div>
@@ -593,6 +742,11 @@
         <button class="btn-insight btn-plus" type="button" onclick="openAddFundsModal()">+</button>
       </div>
 
+      <details class="viz-legend viz-legend-floating" id="vizAtomLegend" hidden>
+        <summary class="viz-legend-summary">Atom Colors</summary>
+        <div class="viz-legend-list" id="vizAtomLegendList"></div>
+      </details>
+
       <!-- Controls panel -->
       <div class="panel viz-collapsible" id="vizCollapsible">
         <button class="viz-header" type="button" id="vizToggleBtn" aria-expanded="true" aria-controls="vizBody">
@@ -601,17 +755,49 @@
         </button>
         <div class="viz-body" id="vizBody">
           <!-- Render mode -->
-          <div class="viz-row viz-mode">
+          <div class="viz-row viz-mode" id="vizModeOptions">
             <label class="viz-radio">
               <input type="radio" name="vizMode" id="vizModeIso" value="iso"  checked  />
               <span>Isosurface</span>
             </label>
 
             <label class="viz-radio">
-              <input type="radio" name="vizMode" id="vizModeVolume" value="volume"/>
+              <input type="checkbox" id="vizModeVolume" value="volume"/>
               <span>Volume</span>
             </label>
 
+            <label class="viz-radio">
+              <input type="checkbox" id="vizModeBallstick" value="ballstick" />
+              <span>Ball &amp; Stick</span>
+            </label>
+
+          </div>
+
+          <div class="viz-group" id="vizGroupPlayback" hidden>
+            <div class="viz-playback-status-row">
+              <div class="viz-playback-status" id="vizFrameReadout">Frame 0 / 0</div>
+            </div>
+
+            <div class="viz-control">
+              <div class="viz-row">
+                <div class="viz-param">Frame</div>
+                <input class="viz-slider" id="vizFrameSlider" type="range" min="0" max="0" step="1" value="0" />
+                <input class="viz-input" id="vizFrameInput" type="number" min="0" max="0" step="1" value="0" />
+              </div>
+            </div>
+
+            <div class="viz-control">
+              <div class="viz-row">
+                <div class="viz-param">Playback FPS</div>
+                <input class="viz-slider" id="vizPlaybackFpsSlider" type="range" min="1" max="60" step="1" value="12" />
+                <input class="viz-input" id="vizPlaybackFpsInput" type="number" min="1" max="60" step="1" value="12" />
+              </div>
+            </div>
+
+            <div class="viz-playback-actions">
+              <button class="btn btn-sm btn-secondary" type="button" id="vizPlaybackToggleBtn">Play</button>
+              <button class="btn btn-sm btn-primary" type="button" id="vizSimMoreFramesBtn">Sim more frames</button>
+            </div>
           </div>
 
           <!-- Volume controls -->
@@ -637,16 +823,16 @@
             <div class="viz-control">
               <div class="viz-row">
                 <div class="viz-param">Transparency end</div>
-                <input class="viz-slider" id="ui_alpha_end" type="range" min="0.0" max="1.0" step="0.01" value="0.5" />
-                <input class="viz-input" id="ui_alpha_end_in" type="number" min="0.0" max="1.0" step="0.01" value="0.5" />
+                <input class="viz-slider" id="ui_alpha_end" type="range" min="0.0" max="1.0" step="0.01" value="0.3" />
+                <input class="viz-input" id="ui_alpha_end_in" type="number" min="0.0" max="1.0" step="0.01" value="0.3" />
               </div>
             </div>
 
             <div class="viz-control">
               <div class="viz-row">
                 <div class="viz-param">Opacity</div>
-                <input class="viz-slider" id="ui_opacity" type="range" min="0.1" max="4.0" step="0.01" value="0.25" />
-                <input class="viz-input" id="ui_opacity_in" type="number" min="0.1" max="4.0" step="0.01" value="0.25" />
+                <input class="viz-slider" id="ui_opacity" type="range" min="0.1" max="4.0" step="0.01" value="0.3" />
+                <input class="viz-input" id="ui_opacity_in" type="number" min="0.1" max="4.0" step="0.01" value="0.3" />
               </div>
             </div>
           </div>
@@ -676,6 +862,7 @@
   <script src="src/webgl-util.js"></script>
   <script src="src/shader-srcs.js"></script>
   <script src="src/volume-raycaster.js"></script>
+  <script src="src/molecule-visualizer.js"></script>
 
   <script>
     fetch("/partials/topbar.html")

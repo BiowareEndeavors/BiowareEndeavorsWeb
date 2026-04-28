@@ -15,6 +15,7 @@ import {
 
 import {
   getStorage,
+  connectStorageEmulator,
 } from "https://www.gstatic.com/firebasejs/12.8.0/firebase-storage.js";
 
 const firebaseConfig = {
@@ -35,7 +36,11 @@ export const storage = getStorage(app);
 
 const LOCAL_FUNCTIONS_HOST = "127.0.0.1";
 const LOCAL_FUNCTIONS_PORT = 5001;
+const LOCAL_STORAGE_HOST = "127.0.0.1";
+const LOCAL_STORAGE_PORT = 9199;
 const LOCAL_FUNCTIONS_REGIONS = new Set();
+const FUNCTIONS_EMULATOR_FLAG = "insight.useFunctionsEmulator";
+let didConnectStorageEmulator = false;
 
 function isLocalFunctionsEmulatorHost() {
   if (typeof window === "undefined") return false;
@@ -43,10 +48,46 @@ function isLocalFunctionsEmulatorHost() {
   return host === "127.0.0.1" || host === "localhost";
 }
 
+function shouldUseFunctionsEmulator() {
+  if (!isLocalFunctionsEmulatorHost()) return false;
+  if (typeof window === "undefined") return false;
+
+  const params = new URLSearchParams(window.location.search || "");
+  const queryValue = String(params.get("functions_emulator") || "").trim().toLowerCase();
+  if (queryValue === "1" || queryValue === "true" || queryValue === "yes") {
+    return true;
+  }
+  if (queryValue === "0" || queryValue === "false" || queryValue === "no") {
+    return false;
+  }
+
+  try {
+    const stored = String(window.localStorage.getItem(FUNCTIONS_EMULATOR_FLAG) || "").trim().toLowerCase();
+    if (stored === "1" || stored === "true" || stored === "yes") return true;
+    if (stored === "0" || stored === "false" || stored === "no") return false;
+  } catch (_) {
+    // Localhost should still prefer the emulator if storage is unavailable.
+  }
+
+  return true;
+}
+
+function connectLocalStorageEmulatorIfNeeded() {
+  if (!shouldUseFunctionsEmulator() || didConnectStorageEmulator) return;
+
+  connectStorageEmulator(storage, LOCAL_STORAGE_HOST, LOCAL_STORAGE_PORT);
+  didConnectStorageEmulator = true;
+  console.info(
+    `[firebase] Using local Storage emulator at ${LOCAL_STORAGE_HOST}:${LOCAL_STORAGE_PORT}`
+  );
+}
+
+connectLocalStorageEmulatorIfNeeded();
+
 export function getInsightFunctions(region = "us-central1") {
   const functions = getFunctions(app, region);
 
-  if (!isLocalFunctionsEmulatorHost()) {
+  if (!shouldUseFunctionsEmulator()) {
     return functions;
   }
 

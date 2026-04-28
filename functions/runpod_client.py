@@ -21,6 +21,7 @@ LEGACY_HARDWARE_TIER = "performance"
 RUNPOD_JOB_TYPES = {
     "point_solve": "single_point",
     "geometry_optimization": "geometry_optimization",
+    "molecular_dynamics": "molecular_dynamics",
 }
 INPUT_XML_STORAGE_PREFIX = "jobInputs"
 
@@ -33,7 +34,7 @@ def build_input_xml_storage_path(job_id: str) -> str:
         )
     return f"{INPUT_XML_STORAGE_PREFIX}/{normalized_job_id}/input.xml"
 
-def upload_job_input_xml(job_id: str, molecule_xml: str) -> str:
+def upload_job_input_xml(job_id: str, molecule_xml: str) -> Dict[str, Any]:
     normalized_xml = str(molecule_xml or "")
     if not normalized_xml:
         raise https_fn.HttpsError(
@@ -47,7 +48,24 @@ def upload_job_input_xml(job_id: str, molecule_xml: str) -> str:
     blob = bucket.blob(blob_path)
     blob.cache_control = "private, max-age=0, no-transform"
     blob.upload_from_string(normalized_xml, content_type="application/xml; charset=utf-8")
-    return blob_path
+    blob.reload()
+
+    if not blob.exists():
+        raise https_fn.HttpsError(
+            code=https_fn.FunctionsErrorCode.INTERNAL,
+            message=(
+                "Input XML upload completed without a readable object at "
+                f"gs://{bucket.name}/{blob_path}."
+            ),
+        )
+
+    return {
+        "bucket": bucket.name,
+        "path": blob_path,
+        "bytes": int(blob.size or len(normalized_xml.encode("utf-8"))),
+        "contentType": blob.content_type or "application/xml; charset=utf-8",
+        **({"generation": str(blob.generation)} if blob.generation is not None else {}),
+    }
 
 def get_user_credits_usd(db: firestore.Client, uid: str) -> float:
     """
@@ -146,7 +164,10 @@ def create_job_doc(
     hardware_tier: str,
     max_runtime_sec: int,
     runpod_endpoint: str,
-    input_xml_path: str = "",
+    input_xml_ref: Dict[str, Any] | None = None,
+    input_xml_upload_error: str = "",
+    md_config: Dict[str, Any] | None = None,
+    md_continuation: Dict[str, Any] | None = None,
 ) -> str:
     db = firestore.client()
     runpod_id = upstream.get("id")
@@ -165,7 +186,10 @@ def create_job_doc(
             "hardwareTier": hardware_tier,
             "maxRuntimeSec": max_runtime_sec,
             "runpodEndpoint": runpod_endpoint,
-            **({"inputXmlRef": {"path": input_xml_path}} if input_xml_path else {}),
+            **({"inputXmlRef": input_xml_ref} if input_xml_ref else {}),
+            **({"inputXmlUploadError": input_xml_upload_error} if input_xml_upload_error else {}),
+            **({"mdConfig": md_config} if md_config else {}),
+            **({"mdContinuation": md_continuation} if md_continuation else {}),
             "status": "IN_QUEUE",
             "statusPriority": 0,
             "needsAttention": 1,
@@ -183,6 +207,7 @@ def submit_job(
     hardware_tier: str,
     max_runtime_sec: int,
     runpod_endpoint: str | None = None,
+    md_config: Dict[str, Any] | None = None,
 ) -> Dict[str, Any]:
     """
     Submits a RunPod serverless job. Returns RunPod response JSON.
@@ -213,6 +238,7 @@ def submit_job(
             "job_type": job_type,
             "hardware_tier": hardware_tier,
             "max_runtime_sec": max_runtime_sec,
+            **({"md_config": md_config, "molecularDynamics": md_config} if md_config else {}),
         }
     }
 

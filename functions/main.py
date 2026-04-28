@@ -30,11 +30,18 @@ from config import (
 initialize_app()
 logging.basicConfig(level=logging.INFO)
 
-SUPPORTED_JOB_MODES = {"point_solve", "geometry_optimization"}
+SUPPORTED_JOB_MODES = {"point_solve", "geometry_optimization", "molecular_dynamics"}
 SUPPORTED_HARDWARE_TIERS = {"budget", "performance"}
 DEFAULT_MAX_RUNTIME_SEC = 30 * 60
 MIN_MAX_RUNTIME_SEC = 60
 MAX_MAX_RUNTIME_SEC = 3 * 60 * 60
+DEFAULT_MD_STEP_COUNT = 5
+MIN_MD_STEP_COUNT = 1
+MAX_MD_STEP_COUNT = 100000
+DEFAULT_MD_TIME_STEP_FS = 0.25
+MIN_MD_TIME_STEP_FS = 0.001
+MAX_MD_TIME_STEP_FS = 10.0
+DEFAULT_MD_TRAJECTORY_FILE = "md_trajectory.json"
 
 
 def normalize_job_mode(raw_mode: Any) -> str:
@@ -80,6 +87,126 @@ def normalize_max_runtime_sec(raw_value: Any) -> int:
 
     return value
 
+
+def normalize_md_config(data: Dict[str, Any], mode: str) -> Optional[Dict[str, Any]]:
+    if mode != "molecular_dynamics":
+        return None
+
+    raw_step_count = data.get("md_step_count", DEFAULT_MD_STEP_COUNT)
+    try:
+        step_count = int(raw_step_count)
+    except (TypeError, ValueError):
+        raise https_fn.HttpsError(
+            code=https_fn.FunctionsErrorCode.INVALID_ARGUMENT,
+            message="md_step_count must be an integer.",
+        )
+
+    if step_count < MIN_MD_STEP_COUNT or step_count > MAX_MD_STEP_COUNT:
+        raise https_fn.HttpsError(
+            code=https_fn.FunctionsErrorCode.INVALID_ARGUMENT,
+            message=f"md_step_count must be between {MIN_MD_STEP_COUNT} and {MAX_MD_STEP_COUNT}.",
+        )
+
+    raw_time_step_fs = data.get("md_time_step_fs", DEFAULT_MD_TIME_STEP_FS)
+    try:
+        time_step_fs = float(raw_time_step_fs)
+    except (TypeError, ValueError):
+        raise https_fn.HttpsError(
+            code=https_fn.FunctionsErrorCode.INVALID_ARGUMENT,
+            message="md_time_step_fs must be a number.",
+        )
+
+    if time_step_fs < MIN_MD_TIME_STEP_FS or time_step_fs > MAX_MD_TIME_STEP_FS:
+        raise https_fn.HttpsError(
+            code=https_fn.FunctionsErrorCode.INVALID_ARGUMENT,
+            message=(
+                f"md_time_step_fs must be between {MIN_MD_TIME_STEP_FS} "
+                f"and {MAX_MD_TIME_STEP_FS} fs."
+            ),
+        )
+
+    trajectory_file = str(data.get("md_trajectory_file") or DEFAULT_MD_TRAJECTORY_FILE).strip()
+    if not trajectory_file:
+        trajectory_file = DEFAULT_MD_TRAJECTORY_FILE
+
+    return {
+        "schemaVersion": 1,
+        "stepCount": step_count,
+        "timeStepFs": time_step_fs,
+        "totalTimeFs": step_count * time_step_fs,
+        "trajectoryFile": trajectory_file,
+    }
+
+
+def normalize_md_continuation(data: Dict[str, Any], mode: str) -> Optional[Dict[str, Any]]:
+    if mode != "molecular_dynamics":
+        return None
+
+    parent_job_id = str(
+        data.get("md_parent_job_id")
+        or data.get("continuation_of_job_id")
+        or ""
+    ).strip()
+    root_job_id = str(
+        data.get("md_root_job_id")
+        or data.get("continuation_root_job_id")
+        or ""
+    ).strip()
+    root_job_name = str(data.get("md_root_job_name") or "").strip()
+    parent_job_name = str(data.get("md_parent_job_name") or "").strip()
+    raw_segment_index = data.get("md_segment_index")
+
+    if not any([
+        parent_job_id,
+        root_job_id,
+        root_job_name,
+        parent_job_name,
+        raw_segment_index not in (None, ""),
+    ]):
+        return None
+
+    if not parent_job_id:
+        raise https_fn.HttpsError(
+            code=https_fn.FunctionsErrorCode.INVALID_ARGUMENT,
+            message="md_parent_job_id is required for MD continuation submissions.",
+        )
+
+    if raw_segment_index in (None, ""):
+        segment_index = 1
+    else:
+        try:
+            segment_index = int(raw_segment_index)
+        except (TypeError, ValueError):
+            raise https_fn.HttpsError(
+                code=https_fn.FunctionsErrorCode.INVALID_ARGUMENT,
+                message="md_segment_index must be an integer.",
+            )
+
+    if segment_index < 1:
+        raise https_fn.HttpsError(
+            code=https_fn.FunctionsErrorCode.INVALID_ARGUMENT,
+            message="md_segment_index must be at least 1.",
+        )
+
+    return {
+        "parentJobId": parent_job_id,
+        "rootJobId": root_job_id or parent_job_id,
+        "segmentIndex": segment_index,
+        **({"rootJobName": root_job_name} if root_job_name else {}),
+        **({"parentJobName": parent_job_name} if parent_job_name else {}),
+    }
+
+
+def validate_md_xml(molecule_xml: str, mode: str) -> None:
+    if mode != "molecular_dynamics":
+        return
+
+    if "InsightMD" not in molecule_xml:
+        raise https_fn.HttpsError(
+            code=https_fn.FunctionsErrorCode.INVALID_ARGUMENT,
+            message="Molecular dynamics XML must include an InsightMD block.",
+        )
+
 @https_fn.on_call(
     enforce_app_check=False,
     secrets=["RUNPOD_API_KEY"],
@@ -107,6 +234,8 @@ def submit_molecule(req: https_fn.CallableRequest) -> Any:
     job_type = get_runpod_job_type_for_mode(mode)
     hardware_tier = normalize_hardware_tier(data.get("hardware_tier"))
     max_runtime_sec = normalize_max_runtime_sec(data.get("max_runtime_sec"))
+    md_config = normalize_md_config(data, mode)
+    md_continuation = normalize_md_continuation(data, mode)
     runpod_endpoint = get_runpod_endpoint_for_tier(hardware_tier, fallback="budget")
     logging.info(
         "submit_molecule routing: mode=%s job_type=%s hardware_tier=%s max_runtime_sec=%s endpoint=%s",
@@ -118,6 +247,7 @@ def submit_molecule(req: https_fn.CallableRequest) -> Any:
     )
 
     n_atoms = validate_molecule_xml(molecule_xml)
+    validate_md_xml(molecule_xml, mode)
 
     upstream = submit_job(
         molecule_xml=molecule_xml,
@@ -126,15 +256,19 @@ def submit_molecule(req: https_fn.CallableRequest) -> Any:
         hardware_tier=hardware_tier,
         max_runtime_sec=max_runtime_sec,
         runpod_endpoint=runpod_endpoint,
+        md_config=md_config,
     )
-    input_xml_path = ""
+    input_xml_ref = None
+    input_xml_upload_error = ""
     try:
         runpod_id = str(upstream.get("id") or "").strip()
         if runpod_id:
-            input_xml_path = upload_job_input_xml(runpod_id, molecule_xml)
+            input_xml_ref = upload_job_input_xml(runpod_id, molecule_xml)
         else:
-            logging.warning("RunPod response missing job id; input XML was not uploaded. upstream=%s", upstream)
+            input_xml_upload_error = "RunPod response missing job id; input XML was not uploaded."
+            logging.warning("%s upstream=%s", input_xml_upload_error, upstream)
     except Exception as e:
+        input_xml_upload_error = str(e)
         logging.exception("Failed to upload input XML for submitted job: %s", e)
 
     job_doc_id = create_job_doc(
@@ -147,7 +281,10 @@ def submit_molecule(req: https_fn.CallableRequest) -> Any:
         hardware_tier=hardware_tier,
         max_runtime_sec=max_runtime_sec,
         runpod_endpoint=runpod_endpoint,
-        input_xml_path=input_xml_path,
+        input_xml_ref=input_xml_ref,
+        input_xml_upload_error=input_xml_upload_error,
+        md_config=md_config,
+        md_continuation=md_continuation,
     )
 
     return {
@@ -162,6 +299,8 @@ def submit_molecule(req: https_fn.CallableRequest) -> Any:
         "runpod_endpoint": runpod_endpoint,
         "jobId": job_doc_id,
         "filename": filename,
+        **({"md_config": md_config} if md_config else {}),
+        **({"md_continuation": md_continuation} if md_continuation else {}),
     }
 
 @https_fn.on_call(
