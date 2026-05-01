@@ -41,7 +41,7 @@ function updateAuthButtons(user) {
 async function handleSignOut() {
   try {
     await signOut(auth);
-    window.location.href = "/auth";
+    window.location.href = "/auth.html";
   } catch (err) {
     console.error("Sign out failed:", err);
   }

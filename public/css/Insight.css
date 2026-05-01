@@ -976,6 +976,10 @@ select option {
   cursor: pointer;
 }
 
+.submit-hardware-option.is-unavailable {
+  cursor: not-allowed;
+}
+
 .submit-hardware-radio {
   position: absolute;
   opacity: 0;
@@ -1020,6 +1024,16 @@ select option {
     0 12px 28px rgba(77,180,255,0.10);
 }
 
+.submit-hardware-option.is-unavailable .submit-hardware-option__content,
+.submit-hardware-option.is-unavailable:hover .submit-hardware-option__content,
+.submit-hardware-option.is-unavailable.is-selected .submit-hardware-option__content {
+  transform: none;
+  border-color: rgba(255,255,255,0.08);
+  background: rgba(255,255,255,0.025);
+  box-shadow: none;
+  opacity: 0.56;
+}
+
 .submit-hardware-option__top {
   display: flex;
   align-items: center;
@@ -1047,6 +1061,12 @@ select option {
   background: rgba(127, 222, 255, 0.92);
 }
 
+.submit-hardware-option.is-unavailable .submit-hardware-option__badge,
+.submit-hardware-option.is-unavailable[data-hardware-tier="performance"] .submit-hardware-option__badge {
+  color: rgba(255,255,255,0.72);
+  background: rgba(255,255,255,0.14);
+}
+
 .submit-hardware-option__price {
   font-size: 12px;
   font-weight: 700;
@@ -1064,6 +1084,28 @@ select option {
   font-size: 12px;
   line-height: 1.5;
   color: rgba(255,255,255,0.68);
+}
+
+.submit-hardware-option__health {
+  display: block;
+  padding-top: 9px;
+  border-top: 1px solid rgba(255,255,255,0.08);
+  font-size: 12px;
+  line-height: 1.45;
+  color: rgba(255,255,255,0.72);
+}
+
+.submit-hardware-option.is-queue-likely .submit-hardware-option__health {
+  color: #ffd18a;
+}
+
+.submit-hardware-option.is-unavailable .submit-hardware-option__health {
+  color: #ffb3b3;
+}
+
+.submit-hardware-option.is-availability-loading .submit-hardware-option__health,
+.submit-hardware-option.is-availability-unknown .submit-hardware-option__health {
+  color: rgba(255,255,255,0.58);
 }
 
 @media (max-width: 560px) {
@@ -1144,6 +1186,28 @@ select option {
 }
 
 .submit-error.active { display: block; }
+
+.submit-availability-notice {
+  display: none;
+  flex-shrink: 0;
+  padding: 10px;
+  border-radius: 8px;
+  border: 1px solid rgba(255,209,138,0.28);
+  background: rgba(255,209,138,0.10);
+  color: #ffe3b0;
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.submit-availability-notice[data-tone="danger"] {
+  border-color: rgba(255, 80, 80, 0.25);
+  background: rgba(255, 80, 80, 0.12);
+  color: #ffb3b3;
+}
+
+.submit-availability-notice.active {
+  display: block;
+}
 
 .submit-tab-panel .submit-row:last-of-type {
   border-bottom: 0;

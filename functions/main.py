@@ -13,6 +13,7 @@ from runpod_client import (
     LEGACY_HARDWARE_TIER,
     create_job_doc,
     get_runpod_endpoint_for_tier,
+    get_runpod_health_for_tier,
     get_runpod_job_type_for_mode,
     get_user_credits_usd,
     submit_job,
@@ -32,6 +33,7 @@ logging.basicConfig(level=logging.INFO)
 
 SUPPORTED_JOB_MODES = {"point_solve", "geometry_optimization", "molecular_dynamics"}
 SUPPORTED_HARDWARE_TIERS = {"budget", "performance"}
+HARDWARE_TIER_ORDER = ("budget", "performance")
 DEFAULT_MAX_RUNTIME_SEC = 30 * 60
 MIN_MAX_RUNTIME_SEC = 60
 MAX_MAX_RUNTIME_SEC = 3 * 60 * 60
@@ -62,6 +64,89 @@ def normalize_hardware_tier(raw_tier: Any) -> str:
             message=f"Unsupported hardware tier: {tier}",
         )
     return tier
+
+
+def to_nonnegative_int(value: Any) -> int:
+    try:
+        number = int(value or 0)
+    except (TypeError, ValueError):
+        return 0
+    return max(0, number)
+
+
+def summarize_runpod_health(hardware_tier: str, payload: Dict[str, Any]) -> Dict[str, Any]:
+    if not isinstance(payload, dict) or not isinstance(payload.get("workers"), dict):
+        raise https_fn.HttpsError(
+            code=https_fn.FunctionsErrorCode.INTERNAL,
+            message="RunPod health response did not include worker counts.",
+        )
+
+    workers = payload.get("workers")
+    jobs = payload.get("jobs") if isinstance(payload, dict) else {}
+    jobs = jobs if isinstance(jobs, dict) else {}
+
+    ready_workers = to_nonnegative_int(workers.get("ready"))
+    running_workers = to_nonnegative_int(workers.get("running"))
+    available_worker_count = ready_workers + running_workers
+    queued_jobs = to_nonnegative_int(jobs.get("inQueue"))
+
+    return {
+        "tier": hardware_tier,
+        "ok": True,
+        "workers": {
+            "ready": ready_workers,
+            "running": running_workers,
+            "idle": to_nonnegative_int(workers.get("idle")),
+            "initializing": to_nonnegative_int(workers.get("initializing")),
+            "throttled": to_nonnegative_int(workers.get("throttled")),
+            "unhealthy": to_nonnegative_int(workers.get("unhealthy")),
+        },
+        "jobs": {
+            "inQueue": queued_jobs,
+            "inProgress": to_nonnegative_int(jobs.get("inProgress")),
+            "completed": to_nonnegative_int(jobs.get("completed")),
+            "failed": to_nonnegative_int(jobs.get("failed")),
+            "retried": to_nonnegative_int(jobs.get("retried")),
+        },
+        "availableWorkerCount": available_worker_count,
+        "hasAvailableWorkers": available_worker_count > 0,
+        "queueWaitLikely": ready_workers == 0 and running_workers > 0,
+        "queuedJobsAhead": queued_jobs,
+    }
+
+
+def unavailable_runpod_health_summary(hardware_tier: str, error: Exception) -> Dict[str, Any]:
+    return {
+        "tier": hardware_tier,
+        "ok": False,
+        "error": str(error),
+        "workers": {
+            "ready": 0,
+            "running": 0,
+            "idle": 0,
+            "initializing": 0,
+            "throttled": 0,
+            "unhealthy": 0,
+        },
+        "jobs": {
+            "inQueue": 0,
+            "inProgress": 0,
+            "completed": 0,
+            "failed": 0,
+            "retried": 0,
+        },
+        "availableWorkerCount": None,
+        "hasAvailableWorkers": None,
+        "queueWaitLikely": False,
+        "queuedJobsAhead": 0,
+    }
+
+
+def fetch_runpod_health_summary(hardware_tier: str) -> Dict[str, Any]:
+    return summarize_runpod_health(
+        hardware_tier,
+        get_runpod_health_for_tier(hardware_tier),
+    )
 
 
 def normalize_max_runtime_sec(raw_value: Any) -> int:
@@ -207,6 +292,39 @@ def validate_md_xml(molecule_xml: str, mode: str) -> None:
             message="Molecular dynamics XML must include an InsightMD block.",
         )
 
+
+@https_fn.on_call(
+    enforce_app_check=False,
+    secrets=["RUNPOD_API_KEY"],
+)
+def get_runpod_health(req: https_fn.CallableRequest) -> Any:
+    require_auth(req)
+
+    data = req.data or {}
+    raw_tiers = data.get("hardware_tiers")
+    if not isinstance(raw_tiers, list) or not raw_tiers:
+        raw_tiers = list(HARDWARE_TIER_ORDER)
+
+    tiers: List[str] = []
+    for raw_tier in raw_tiers:
+        tier = normalize_hardware_tier(raw_tier)
+        if tier not in tiers:
+            tiers.append(tier)
+
+    summaries: Dict[str, Any] = {}
+    for tier in tiers:
+        try:
+            summaries[tier] = fetch_runpod_health_summary(tier)
+        except Exception as e:
+            logging.warning("Unable to fetch RunPod health for tier=%s: %s", tier, e)
+            summaries[tier] = unavailable_runpod_health_summary(tier, e)
+
+    return {
+        "ok": any(summary.get("ok") for summary in summaries.values()),
+        "tiers": summaries,
+    }
+
+
 @https_fn.on_call(
     enforce_app_check=False,
     secrets=["RUNPOD_API_KEY"],
@@ -237,6 +355,24 @@ def submit_molecule(req: https_fn.CallableRequest) -> Any:
     md_config = normalize_md_config(data, mode)
     md_continuation = normalize_md_continuation(data, mode)
     runpod_endpoint = get_runpod_endpoint_for_tier(hardware_tier, fallback="budget")
+    runpod_health_summary = None
+    try:
+        runpod_health_summary = fetch_runpod_health_summary(hardware_tier)
+    except Exception as e:
+        logging.warning(
+            "Unable to verify RunPod worker health before submit. tier=%s error=%s",
+            hardware_tier,
+            e,
+        )
+    else:
+        if runpod_health_summary.get("hasAvailableWorkers") is False:
+            raise https_fn.HttpsError(
+                code=https_fn.FunctionsErrorCode.FAILED_PRECONDITION,
+                message=(
+                    f"No {hardware_tier} workers are available right now. "
+                    "Please try again later."
+                ),
+            )
     logging.info(
         "submit_molecule routing: mode=%s job_type=%s hardware_tier=%s max_runtime_sec=%s endpoint=%s",
         mode,
@@ -299,6 +435,7 @@ def submit_molecule(req: https_fn.CallableRequest) -> Any:
         "runpod_endpoint": runpod_endpoint,
         "jobId": job_doc_id,
         "filename": filename,
+        **({"runpod_health": runpod_health_summary} if runpod_health_summary else {}),
         **({"md_config": md_config} if md_config else {}),
         **({"md_continuation": md_continuation} if md_continuation else {}),
     }

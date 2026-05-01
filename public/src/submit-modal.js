@@ -1,3 +1,6 @@
+import { getInsightFunctions } from "/src/firebase-init.js";
+import { httpsCallable } from "https://www.gstatic.com/firebasejs/12.8.0/firebase-functions.js";
+
 const overlay = document.getElementById("submitOverlay");
 const closeBtn = document.getElementById("submitCloseBtn");
 const submitJobBtn = document.getElementById("submitJobBtn");
@@ -16,6 +19,13 @@ const atomCountEls = Array.from(document.querySelectorAll('[data-submit-bind="at
 
 const submitModeTabs = Array.from(document.querySelectorAll("[data-submit-mode]"));
 const submitPanels = Array.from(document.querySelectorAll("[data-submit-panel]"));
+
+const FUNCTIONS_REGION = "us-central1";
+const RUNPOD_HEALTH_FUNCTION_NAME = "get_runpod_health";
+const functions = getInsightFunctions(FUNCTIONS_REGION);
+const getRunpodHealthCallable = httpsCallable(functions, RUNPOD_HEALTH_FUNCTION_NAME);
+let hardwareHealthRequestSeq = 0;
+let availabilityNoticeEl = document.getElementById("submitAvailabilityNotice");
 
 const JOB_MODES = {
   point_solve: {
@@ -91,6 +101,11 @@ let _state = {
   initialMdTimeStepFs: null,
   initialFocusInput: "",
   disabledInputs: [],
+  isSubmitting: false,
+  healthLoading: false,
+  healthError: "",
+  hardwareHealth: {},
+  activeHealthRequestId: 0,
 };
 
 function showError(msg) {
@@ -105,9 +120,130 @@ function showError(msg) {
   errEl.classList.add("active");
 }
 
+function getAvailabilityNoticeEl() {
+  if (availabilityNoticeEl) return availabilityNoticeEl;
+  if (!errEl?.parentNode) return null;
+
+  availabilityNoticeEl = document.createElement("div");
+  availabilityNoticeEl.id = "submitAvailabilityNotice";
+  availabilityNoticeEl.className = "submit-availability-notice";
+  availabilityNoticeEl.setAttribute("role", "status");
+  errEl.parentNode.insertBefore(availabilityNoticeEl, errEl);
+  return availabilityNoticeEl;
+}
+
+function showAvailabilityNotice(msg, tone = "warning") {
+  const noticeEl = getAvailabilityNoticeEl();
+  if (!noticeEl) return;
+
+  const message = String(msg || "").trim();
+  noticeEl.textContent = message;
+  noticeEl.dataset.tone = tone;
+  noticeEl.classList.toggle("active", Boolean(message));
+}
+
 function toOptionalFiniteNumber(value) {
   const number = Number(value);
   return Number.isFinite(number) ? number : null;
+}
+
+function toNonnegativeInt(value) {
+  const number = Number(value);
+  if (!Number.isFinite(number)) return 0;
+  return Math.max(0, Math.trunc(number));
+}
+
+function normalizeHardwareHealthSummary(summary) {
+  if (!summary || typeof summary !== "object") return null;
+
+  const workers = summary.workers && typeof summary.workers === "object" ? summary.workers : {};
+  const jobs = summary.jobs && typeof summary.jobs === "object" ? summary.jobs : {};
+  const ready = toNonnegativeInt(workers.ready);
+  const running = toNonnegativeInt(workers.running);
+  const inQueue = toNonnegativeInt(jobs.inQueue);
+  const hasKnownAvailability =
+    summary.ok === true && typeof summary.hasAvailableWorkers === "boolean";
+
+  return {
+    ok: summary.ok === true,
+    error: String(summary.error || ""),
+    ready,
+    running,
+    inQueue,
+    availableWorkerCount: ready + running,
+    hasAvailableWorkers: hasKnownAvailability ? summary.hasAvailableWorkers : null,
+    queueWaitLikely: ready === 0 && running > 0,
+  };
+}
+
+function getHardwareHealth(tier) {
+  return _state.hardwareHealth?.[tier] || null;
+}
+
+function isHardwareTierUnavailable(tier) {
+  const health = getHardwareHealth(tier);
+  return health?.ok === true && health.availableWorkerCount === 0;
+}
+
+function areAllHardwareTiersUnavailable() {
+  return Object.keys(HARDWARE_TIERS).every((tier) => isHardwareTierUnavailable(tier));
+}
+
+function getAllWorkersUnavailableMessage() {
+  return "No Budget or Performance workers are available right now. Please try again later.";
+}
+
+function formatCount(value, singular, plural = `${singular}s`) {
+  const count = toNonnegativeInt(value);
+  return `${count} ${count === 1 ? singular : plural}`;
+}
+
+function getHardwareHealthText(tier) {
+  const health = getHardwareHealth(tier);
+
+  if (_state.healthLoading && !health) {
+    return "Checking worker availability...";
+  }
+
+  if (!health) {
+    return "Worker availability refreshes when this modal opens.";
+  }
+
+  if (!health.ok) {
+    return "Worker availability unavailable. You can still submit.";
+  }
+
+  const workerText = `${formatCount(health.ready, "ready worker")}, ${formatCount(
+    health.running,
+    "running worker"
+  )}`;
+
+  if (health.availableWorkerCount === 0) {
+    return `${workerText}. No workers available right now.`;
+  }
+
+  if (health.ready === 0 && health.running > 0) {
+    return `${workerText}. Queue wait possible: ${formatCount(health.inQueue, "job")} ahead.`;
+  }
+
+  return workerText;
+}
+
+function renderSubmitAvailabilityNotice() {
+  if (areAllHardwareTiersUnavailable()) {
+    showAvailabilityNotice(getAllWorkersUnavailableMessage(), "danger");
+    return;
+  }
+
+  if (_state.healthError) {
+    showAvailabilityNotice(
+      "Worker availability could not be refreshed. You can still submit, but capacity may have changed.",
+      "warning"
+    );
+    return;
+  }
+
+  showAvailabilityNotice("");
 }
 
 function getPreferredMode() {
@@ -152,7 +288,9 @@ function isSubmitInputDisabled(name) {
 function applyInputDisabledStates() {
   document.querySelectorAll("[data-submit-input]").forEach((input) => {
     const inputName = input.dataset.submitInput || "";
-    const disabled = isSubmitInputDisabled(inputName);
+    const disabled =
+      isSubmitInputDisabled(inputName) ||
+      (inputName === "hardwareTier" && isHardwareTierUnavailable(input.value));
     input.disabled = disabled;
     input.setAttribute("aria-disabled", String(disabled));
   });
@@ -326,13 +464,64 @@ function resetInputs() {
   renderMdEstimates();
 }
 
+function isHardwareInputSelectable(input) {
+  return (
+    input &&
+    Object.prototype.hasOwnProperty.call(HARDWARE_TIERS, input.value) &&
+    !isSubmitInputDisabled("hardwareTier") &&
+    !isHardwareTierUnavailable(input.value)
+  );
+}
+
+function ensureHardwareHealthEl(option) {
+  let healthEl = option.querySelector("[data-submit-bind='hardwareHealth']");
+  if (healthEl) return healthEl;
+
+  const content = option.querySelector(".submit-hardware-option__content");
+  if (!content) return null;
+
+  healthEl = document.createElement("span");
+  healthEl.className = "submit-hardware-option__health";
+  healthEl.dataset.submitBind = "hardwareHealth";
+  content.appendChild(healthEl);
+  return healthEl;
+}
+
+function renderHardwareAvailability() {
+  document.querySelectorAll("[data-submit-hardware-option]").forEach((option) => {
+    const tier = option.dataset.hardwareTier || "";
+    const health = getHardwareHealth(tier);
+    const unavailable = isHardwareTierUnavailable(tier);
+    const queueLikely = health?.ok === true && health.ready === 0 && health.running > 0;
+    const unknown = Boolean(health && !health.ok) || Boolean(_state.healthError && !health);
+    const loading = _state.healthLoading && !health;
+    const input = option.querySelector('[data-submit-input="hardwareTier"]');
+    const healthEl = ensureHardwareHealthEl(option);
+
+    option.classList.toggle("is-unavailable", unavailable);
+    option.classList.toggle("is-queue-likely", queueLikely);
+    option.classList.toggle("is-availability-unknown", unknown);
+    option.classList.toggle("is-availability-loading", loading);
+    option.setAttribute("aria-disabled", String(Boolean(input?.disabled)));
+
+    if (healthEl) {
+      healthEl.textContent = getHardwareHealthText(tier);
+    }
+  });
+}
+
 function renderHardwareCards() {
+  applyInputDisabledStates();
+
   submitPanels.forEach((panel) => {
     const hardwareInputs = Array.from(panel.querySelectorAll('[data-submit-input="hardwareTier"]'));
 
     if (!hardwareInputs.length) return;
 
     const selectedInput =
+      hardwareInputs.find((input) => input.checked && isHardwareInputSelectable(input)) ||
+      hardwareInputs.find((input) => input.value === "budget" && isHardwareInputSelectable(input)) ||
+      hardwareInputs.find((input) => isHardwareInputSelectable(input)) ||
       hardwareInputs.find((input) => input.checked && Object.keys(HARDWARE_TIERS).includes(input.value)) ||
       hardwareInputs.find((input) => input.value === "budget") ||
       hardwareInputs[0];
@@ -348,7 +537,10 @@ function renderHardwareCards() {
     });
   });
 
+  renderHardwareAvailability();
   renderRuntimeEstimates();
+  renderSubmitAvailabilityNotice();
+  renderSubmitButton();
 }
 
 function renderRuntimeEstimates() {
@@ -384,6 +576,17 @@ function renderMdEstimates() {
   });
 }
 
+function renderSubmitButton() {
+  if (!submitJobBtn) return;
+
+  const modeMeta = getModeMeta(_state.selectedMode);
+  const blockedByAvailability = areAllHardwareTiersUnavailable();
+  submitJobBtn.disabled = Boolean(_state.isSubmitting || blockedByAvailability);
+  submitJobBtn.textContent = _state.isSubmitting
+    ? (_state.submittingLabelOverride || modeMeta.submittingLabel)
+    : (_state.submitLabelOverride || modeMeta.submitLabel);
+}
+
 function renderSelectedMode() {
   const preferredMode = getPreferredMode();
   if (!Object.prototype.hasOwnProperty.call(JOB_MODES, preferredMode)) {
@@ -392,9 +595,6 @@ function renderSelectedMode() {
   if (_state.lockedMode) {
     _state.selectedMode = preferredMode;
   }
-
-  const meta = getModeMeta(_state.selectedMode);
-  const submitLabel = _state.submitLabelOverride || meta.submitLabel;
 
   submitModeTabs.forEach((tab) => {
     const isActive = tab.dataset.submitMode === _state.selectedMode;
@@ -413,7 +613,8 @@ function renderSelectedMode() {
     panel.setAttribute("aria-hidden", String(!isActive));
   });
 
-  if (submitJobBtn) submitJobBtn.textContent = submitLabel;
+  renderSubmitButton();
+  renderSubmitAvailabilityNotice();
 }
 
 function setSelectedMode(mode) {
@@ -433,6 +634,40 @@ function focusActiveInput(preferredInputName = "") {
     input?.focus();
     input?.select?.();
   }, 0);
+}
+
+async function refreshHardwareHealth() {
+  const requestId = ++hardwareHealthRequestSeq;
+  _state.activeHealthRequestId = requestId;
+  _state.healthLoading = true;
+  _state.healthError = "";
+  _state.hardwareHealth = {};
+  renderHardwareCards();
+
+  try {
+    const response = await getRunpodHealthCallable({
+      hardware_tiers: Object.keys(HARDWARE_TIERS),
+    });
+
+    if (_state.activeHealthRequestId !== requestId) return;
+
+    const tiers = response?.data?.tiers || {};
+    const hardwareHealth = {};
+    Object.keys(HARDWARE_TIERS).forEach((tier) => {
+      const summary = normalizeHardwareHealthSummary(tiers[tier]);
+      if (summary) hardwareHealth[tier] = summary;
+    });
+
+    _state.hardwareHealth = hardwareHealth;
+  } catch (e) {
+    if (_state.activeHealthRequestId !== requestId) return;
+    _state.healthError = e?.message || String(e);
+    _state.hardwareHealth = {};
+  } finally {
+    if (_state.activeHealthRequestId !== requestId) return;
+    _state.healthLoading = false;
+    renderHardwareCards();
+  }
 }
 
 function bindTabKeyboardNavigation() {
@@ -456,7 +691,6 @@ function bindTabKeyboardNavigation() {
 }
 
 async function handleSubmit() {
-  const modeMeta = getModeMeta(_state.selectedMode);
   const nicknameEl = getActiveInput("nickname");
   const maxRuntimeEl = getActiveInput("maxRuntime");
   const mdStepCountEl = getActiveInput("mdStepCount");
@@ -472,10 +706,21 @@ async function handleSubmit() {
       return;
     }
 
+    if (areAllHardwareTiersUnavailable()) {
+      showError(getAllWorkersUnavailableMessage());
+      return;
+    }
+
     const hardwareTierEl = getActiveInput("hardwareTier");
     const hardwareTier = Object.keys(HARDWARE_TIERS).includes(hardwareTierEl?.value)
       ? hardwareTierEl.value
       : "budget";
+
+    if (isHardwareTierUnavailable(hardwareTier)) {
+      const label = getHardwareMeta(hardwareTier).label;
+      showError(`${label} has no ready or running workers right now. Please choose another tier or try again later.`);
+      return;
+    }
 
     const maxMinutes = getValidatedMaxRuntimeMinutes(maxRuntimeEl);
     const maxRuntimeSec = maxMinutes * 60;
@@ -499,10 +744,8 @@ async function handleSubmit() {
       };
     }
 
-    if (submitJobBtn) {
-      submitJobBtn.disabled = true;
-      submitJobBtn.textContent = _state.submittingLabelOverride || modeMeta.submittingLabel;
-    }
+    _state.isSubmitting = true;
+    renderSubmitButton();
 
     if (typeof _state.onSubmit !== "function") {
       throw new Error("Missing submit handler.");
@@ -523,7 +766,7 @@ async function handleSubmit() {
   } catch (e) {
     showError(e?.message || String(e));
   } finally {
-    if (submitJobBtn) submitJobBtn.disabled = false;
+    _state.isSubmitting = false;
     renderSelectedMode();
   }
 }
@@ -616,6 +859,11 @@ window.openSubmitModal = function openSubmitModal({
     initialMdTimeStepFs: toOptionalFiniteNumber(initialMdTimeStepFs),
     initialFocusInput: initialFocusInput || "",
     disabledInputs: Array.isArray(disabledInputs) ? disabledInputs : [],
+    isSubmitting: false,
+    healthLoading: false,
+    healthError: "",
+    hardwareHealth: {},
+    activeHealthRequestId: 0,
   };
 
   setBoundText("fileName", _state.displayFileName || "-");
@@ -632,4 +880,5 @@ window.openSubmitModal = function openSubmitModal({
   scrollActivePanelToTop();
   open();
   focusActiveInput();
+  refreshHardwareHealth();
 };

@@ -1,7 +1,6 @@
 {
   "functions": [
     {
-      "source": "functions",
       "codebase": "default",
       "disallowLegacyRuntimeConfig": true,
       "ignore": [
@@ -11,6 +10,7 @@
         "firebase-debug.*.log",
         "*.local"
       ],
+      "source": "functions",
       "runtime": "python313"
     }
   ],
@@ -19,10 +19,36 @@
   },
   "hosting": {
     "public": "public",
-    "ignore": ["firebase.json", "**/.*", "**/node_modules/**"],
+    "ignore": [
+      "firebase.json",
+      "**/.*",
+      "**/node_modules/**"
+    ],
     "redirects": [
-      { "source": "/auth", "destination": "/auth.html", "type": 301 },
-      { "source": "/terms", "destination": "/terms.html", "type": 301 }
+      {
+        "source": "/auth",
+        "destination": "/auth.html",
+        "type": 301
+      },
+      {
+        "source": "/terms",
+        "destination": "/terms.html",
+        "type": 301
+      }
     ]
+  },
+  "firestore": {
+    "database": "(default)",
+    "location": "nam5",
+    "rules": "firestore.rules",
+    "indexes": "firestore.indexes.json"
+  },
+  "auth": {
+    "providers": {
+      "googleSignIn": {
+        "oAuthBrandDisplayName": "My App",
+        "supportEmail": "biowareEndeavors@gmail.com"
+      }
+    }
   }
 }

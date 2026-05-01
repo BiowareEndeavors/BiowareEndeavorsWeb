@@ -97,8 +97,8 @@ onAuthStateChanged(auth, (user) => {
   authReady = true;
 
   if (!user) {
-    setStatus("Not signed in. Redirecting to /auth...");
-    window.location.href = "/auth";
+    setStatus("Not signed in. Redirecting to /auth.html...");
+    window.location.href = "/auth.html";
   } else {
     setStatus("Signed in. Drop an XML file or MD frames JSON.");
   }

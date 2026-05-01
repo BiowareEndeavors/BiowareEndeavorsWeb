@@ -1,0 +1,49 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // --- Users: allow user to read their own doc (for funds listener) ---
+    match /users/{uid} {
+      allow read: if request.auth != null && request.auth.uid == uid;
+
+      // Clients should not be able to create/update credits directly.
+      // Creation and updates happen via Cloud Functions (Admin SDK bypasses rules).
+      allow create, update, delete: if false;
+    }
+
+    // --- Jobs ---
+    match /jobs/{jobId} {
+      allow read: if request.auth != null
+                  && resource.data.uid == request.auth.uid;
+
+      allow update: if request.auth != null && resource.data.uid == request.auth.uid 
+      && request.resource.data.diff(resource.data).changedKeys().hasOnly(["lastStatusSeen","needsAttention"]);
+    }
+    
+    match /customers/{uid} {
+      allow read: if request.auth.uid == uid;
+
+      match /checkout_sessions/{id} {
+        allow read, write: if request.auth.uid == uid;
+      }
+      match /subscriptions/{id} {
+        allow read: if request.auth.uid == uid;
+      }
+      match /payments/{id} {
+        allow read: if request.auth.uid == uid;
+      }
+    }
+
+    match /products/{id} {
+      allow read: if true;
+
+      match /prices/{id} {
+        allow read: if true;
+      }
+
+      match /tax_rates/{id} {
+        allow read: if true;
+      }
+    }
+  }
+}

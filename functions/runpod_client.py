@@ -127,6 +127,18 @@ def _normalize_status_url(endpoint: str, job_id: str) -> str:
     return f"{e}/status/{job_id}"
 
 
+def _normalize_health_url(endpoint: str) -> str:
+    """
+    Health endpoint shape is:
+      https://api.runpod.ai/v2/<endpointId>/health
+    If the configured endpoint includes /run, strip it first.
+    """
+    e = (endpoint or "").rstrip("/")
+    if e.endswith("/run") or e.endswith("/runsync"):
+        e = e.rsplit("/", 1)[0]
+    return f"{e}/health"
+
+
 def get_runpod_endpoint_for_tier(hardware_tier: str, *, fallback: str = LEGACY_HARDWARE_TIER) -> str:
     tier = str(hardware_tier or "").strip().lower() or fallback
     endpoint = RUNPOD_ENDPOINTS.get(tier)
@@ -141,6 +153,43 @@ def get_runpod_endpoint_for_tier(hardware_tier: str, *, fallback: str = LEGACY_H
         code=https_fn.FunctionsErrorCode.FAILED_PRECONDITION,
         message=f"Unsupported RunPod hardware tier: {tier}",
     )
+
+
+def get_runpod_health_for_tier(hardware_tier: str) -> Dict[str, Any]:
+    """
+    Fetches serverless endpoint health for the given hardware tier.
+    """
+    endpoint = get_runpod_endpoint_for_tier(hardware_tier, fallback="budget")
+    api_key = get_runpod_api_key()
+    if not api_key:
+        raise https_fn.HttpsError(
+            code=https_fn.FunctionsErrorCode.FAILED_PRECONDITION,
+            message="Server not configured: RUNPOD_API_KEY missing.",
+        )
+
+    health_url = _normalize_health_url(endpoint)
+    timeout_s = get_request_timeout_s()
+    headers = {"Authorization": api_key}
+
+    try:
+        r = requests.get(health_url, headers=headers, timeout=timeout_s)
+    except requests.RequestException as e:
+        raise https_fn.HttpsError(
+            code=https_fn.FunctionsErrorCode.UNAVAILABLE,
+            message=f"RunPod health request failed: {str(e)}",
+        )
+
+    if not (200 <= r.status_code < 300):
+        body_snip = (r.text or "")[:500]
+        raise https_fn.HttpsError(
+            code=https_fn.FunctionsErrorCode.INTERNAL,
+            message=f"RunPod health error {r.status_code}: {body_snip}",
+        )
+
+    try:
+        return r.json()
+    except ValueError:
+        return {"raw": (r.text or "")[:2000]}
 
 
 def get_runpod_job_type_for_mode(mode: str) -> str:
