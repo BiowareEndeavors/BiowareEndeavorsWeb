@@ -12,7 +12,6 @@
   <link rel="stylesheet" href="css/all.css"> 
   <link rel="stylesheet" href="css/topbar.css"> 
   <link rel="stylesheet" href="css/Insight.css">
-  <link rel="stylesheet" href="css/demo-banner.css">
 
   <title>Insight</title>
 
@@ -52,21 +51,20 @@
               <button class="btn btn-sm btn-secondary" type="button" id="jobDownloadOptimizedXmlBtn" hidden>Download optimized XML</button>
             </div>
 
-            <div class="jobs-actions__hint" id="jobActionsHint"></div>
+            <div class="jobs-actions__hint" id="jobActionsHint" hidden></div>
 
-            <div class="jobs-actions__section-title">output.json</div>
-            <pre id="jobResultJson" class="jobs-result__pre"></pre>
+            <div id="jobOutputSummary" class="job-output"></div>
           </div>
         </div>
       </div>
     </div>
   </div>
 
-  <!-- Submit Job modal -->
+  <!-- Input Builder -->
   <div id="submitOverlay" class="jobs-overlay submit-overlay" aria-hidden="true">
-    <div class="jobs-modal submit-modal" role="dialog" aria-modal="true" aria-label="Submit job">
+    <div class="jobs-modal submit-modal" role="dialog" aria-modal="true" aria-label="Input builder">
       <div class="jobs-modal__header">
-        <div class="jobs-modal__title" id="submitModalTitle">Submit Job</div>
+        <div class="jobs-modal__title" id="submitModalTitle">Input Builder</div>
         <div class="jobs-modal__controls">
           <button class="jobs-close-x" type="button" id="submitCloseBtn" title="Close">&times;</button>
         </div>
@@ -75,6 +73,50 @@
       <div class="jobs-modal__body">
         <div class="submit-context-banner" id="submitModalContext" hidden></div>
 
+        <div class="submit-builder-screen">
+          <section class="input-builder-panel" aria-label="Molecule input builder">
+            <div class="input-builder-header">
+              <div>
+                <div class="input-builder-title">Molecule Input</div>
+                <div class="input-builder-meta">
+                  <span data-submit-bind="fileName">-</span>
+                  <span aria-hidden="true">/</span>
+                  <span><span data-submit-bind="atomCount">-</span> atoms</span>
+                </div>
+              </div>
+              <button class="input-builder-icon-btn" type="button" id="inputBuilderResetViewBtn" title="Reset view">Reset View</button>
+            </div>
+
+            <div class="input-builder-visual" id="inputBuilderVisualWrap">
+              <canvas id="inputBuilderCanvas" aria-label="Current molecule ball and stick preview"></canvas>
+              <div class="input-builder-empty" id="inputBuilderEmpty" hidden>No atoms in this input.</div>
+            </div>
+
+            <div class="input-builder-controls">
+              <div class="input-builder-units-note">Velocity units: &Aring;/fs</div>
+              <button class="btn btn-sm btn-secondary" type="button" id="inputBuilderAddAtomBtn">Add Atom</button>
+            </div>
+
+            <div class="input-atom-table-wrap" id="inputAtomTableWrap">
+              <table class="input-atom-table">
+                <thead>
+                  <tr>
+                    <th scope="col">Atom</th>
+                    <th scope="col">X</th>
+                    <th scope="col">Y</th>
+                    <th scope="col">Z</th>
+                    <th scope="col">VX (&Aring;/fs)</th>
+                    <th scope="col">VY (&Aring;/fs)</th>
+                    <th scope="col">VZ (&Aring;/fs)</th>
+                    <th scope="col"></th>
+                  </tr>
+                </thead>
+                <tbody id="inputAtomRows"></tbody>
+              </table>
+            </div>
+          </section>
+
+          <section class="submit-config-panel" aria-label="Job settings">
         <div class="submit-tabs-scroller" id="submitTabsScroller">
           <div class="submit-tabs" role="tablist" aria-label="Job types">
             <button
@@ -145,6 +187,20 @@
           <div class="submit-value" id="submitAtomCount">&mdash;</div>
         </div>
 
+        <div class="submit-row submit-row--stack">
+          <label class="submit-label" for="submitPointSolveSystemCharge">Total system charge</label>
+          <input
+            class="submit-input"
+            id="submitPointSolveSystemCharge"
+            data-submit-input="systemCharge"
+            data-default-value="0"
+            type="number"
+            step="1"
+            inputmode="numeric"
+          />
+          <div class="submit-hint">Net molecular charge used to set the electron count.</div>
+        </div>
+
         <div class="submit-hint" style="margin-bottom:8px;">
           Pressure tested for systems &lt; 100 atoms. For systems larger than this use at your own risk.
         </div>
@@ -164,7 +220,7 @@
 
         <div class="submit-row">
           <div class="submit-label">SCF tolerance</div>
-          <div class="submit-value" id="submitScfTol">1e-4</div>
+          <div class="submit-value" id="submitScfTol">1e-6</div>
         </div>
 
         <div class="submit-hint" style="margin-bottom:8px;">
@@ -206,10 +262,9 @@
               <span class="submit-hardware-option__content">
                 <span class="submit-hardware-option__top">
                   <span class="submit-hardware-option__badge">Budget</span>
-                  <span class="submit-hardware-option__price">$0.002-$0.006 / s</span>
+                  <span class="submit-hardware-option__price">$0.00047/s - $0.00062/s</span>
                 </span>
                 <span class="submit-hardware-option__gpu">RTX 5090 / RTX 4090</span>
-                <span class="submit-hardware-option__copy">Lower cost GPUs for exploratory runs and lighter workloads.</span>
               </span>
             </label>
 
@@ -224,10 +279,9 @@
               <span class="submit-hardware-option__content">
                 <span class="submit-hardware-option__top">
                   <span class="submit-hardware-option__badge">Performance</span>
-                  <span class="submit-hardware-option__price">$0.01-$0.014 / s</span>
+                  <span class="submit-hardware-option__price">$0.00174/s - $0.00230/s</span>
                 </span>
                 <span class="submit-hardware-option__gpu">H200 / H100</span>
-                <span class="submit-hardware-option__copy">Premium GPUs for faster turnaround on denser or more urgent jobs.</span>
               </span>
             </label>
           </div>
@@ -239,7 +293,7 @@
             class="submit-input"
             id="submitPointSolveMaxRuntime"
             data-submit-input="maxRuntime"
-            data-default-value="5"
+            data-default-value="10"
             type="number"
             min="1"
             max="60"
@@ -247,7 +301,7 @@
           />
           <div class="submit-runtime-estimate">
             <span class="submit-runtime-estimate__label">Estimated max cost</span>
-            <span class="submit-runtime-estimate__value" data-submit-bind="maxCost">$0.90</span>
+            <span class="submit-runtime-estimate__value" data-submit-bind="maxCost">$0.37</span>
           </div>
           <div class="submit-hint">Point solve jobs are cancelled after this limit.</div>
         </div>
@@ -281,8 +335,18 @@
               <div class="submit-value" data-submit-bind="atomCount">-</div>
             </div>
 
-            <div class="submit-hint submit-section-hint">
-              Geometry optimization is best for structures that need relaxation before analysis.
+            <div class="submit-row submit-row--stack">
+              <label class="submit-label" for="submitGeometryOptimizationSystemCharge">Total system charge</label>
+              <input
+                class="submit-input"
+                id="submitGeometryOptimizationSystemCharge"
+                data-submit-input="systemCharge"
+                data-default-value="0"
+                type="number"
+                step="1"
+                inputmode="numeric"
+              />
+              <div class="submit-hint">Net molecular charge used for every optimization point solve.</div>
             </div>
 
             <div class="submit-section-title">Simulation Defaults</div>
@@ -298,22 +362,12 @@
             </div>
 
             <div class="submit-row">
-              <div class="submit-label">Optimizer</div>
-              <div class="submit-value">L-BFGS</div>
-            </div>
-
-            <div class="submit-row">
-              <div class="submit-label">Geometry convergence</div>
-              <div class="submit-value">Tight</div>
-            </div>
-
-            <div class="submit-row">
               <div class="submit-label">SCF tolerance</div>
-              <div class="submit-value">1e-4</div>
+              <div class="submit-value">1e-6</div>
             </div>
 
             <div class="submit-hint submit-section-hint">
-              Optimization defaults are fixed for now so geometry jobs stay predictable.
+              Defaults shown for transparency. Customization coming soon.
             </div>
 
             <div class="submit-section-title">Job Settings</div>
@@ -327,13 +381,12 @@
             type="text"
             autocomplete="off"
           />
-          <div class="submit-hint">Give optimized runs a unique name so they are easy to spot later.</div>
+          <div class="submit-hint">Shown in the Jobs list.</div>
         </div>
 
         <div class="submit-row submit-row--stack">
           <div class="submit-row-head">
             <div class="submit-label" id="submitGeometryOptimizationHardwareLabel">Hardware</div>
-            <div class="submit-row-caption">Geometry relaxations can take longer, so hardware choice matters more here.</div>
           </div>
           <div class="submit-hardware-picker" role="radiogroup" aria-labelledby="submitGeometryOptimizationHardwareLabel">
             <label class="submit-hardware-option" data-submit-hardware-option data-hardware-tier="budget">
@@ -349,10 +402,9 @@
               <span class="submit-hardware-option__content">
                 <span class="submit-hardware-option__top">
                   <span class="submit-hardware-option__badge">Budget</span>
-                  <span class="submit-hardware-option__price">$0.001-$0.003 / s</span>
+                  <span class="submit-hardware-option__price">$0.00047/s - $0.00062/s</span>
                 </span>
                 <span class="submit-hardware-option__gpu">RTX 5090 / RTX 4090</span>
-                <span class="submit-hardware-option__copy">A good fit for iterative optimizations when cost control comes first.</span>
               </span>
             </label>
 
@@ -367,10 +419,9 @@
               <span class="submit-hardware-option__content">
                 <span class="submit-hardware-option__top">
                   <span class="submit-hardware-option__badge">Performance</span>
-                  <span class="submit-hardware-option__price">$0.005-$0.007 / s</span>
+                  <span class="submit-hardware-option__price">$0.00174/s - $0.00230/s</span>
                 </span>
                 <span class="submit-hardware-option__gpu">H200 / H100</span>
-                <span class="submit-hardware-option__copy">Best when you want optimization results back quickly on heavier systems.</span>
               </span>
             </label>
           </div>
@@ -382,7 +433,7 @@
             class="submit-input"
             id="submitGeometryOptimizationMaxRuntime"
                 data-submit-input="maxRuntime"
-                data-default-value="10"
+                data-default-value="30"
                 type="number"
                 min="1"
                 max="180"
@@ -390,7 +441,7 @@
               />
               <div class="submit-runtime-estimate">
                 <span class="submit-runtime-estimate__label">Estimated max cost</span>
-                <span class="submit-runtime-estimate__value" data-submit-bind="maxCost">$1.80</span>
+                <span class="submit-runtime-estimate__value" data-submit-bind="maxCost">$1.12</span>
               </div>
               <div class="submit-hint">Optimization jobs usually need more time than point solves.</div>
             </div>
@@ -423,9 +474,21 @@
               <div class="submit-value" data-submit-bind="atomCount">-</div>
             </div>
 
-            <div class="submit-hint submit-section-hint" id="submitMolecularDynamicsInputHint">
-              MD submissions add an <code>InsightMD</code> block to the XML sent to the endpoint. If your uploaded XML includes <code>VelocityX</code>, <code>VelocityY</code>, and <code>VelocityZ</code>, those initial velocities are preserved.
+            <div class="submit-row submit-row--stack">
+              <label class="submit-label" for="submitMolecularDynamicsSystemCharge">Total system charge</label>
+              <input
+                class="submit-input"
+                id="submitMolecularDynamicsSystemCharge"
+                data-submit-input="systemCharge"
+                data-default-value="0"
+                type="number"
+                step="1"
+                inputmode="numeric"
+              />
+              <div class="submit-hint">Net molecular charge used for each MD force evaluation.</div>
             </div>
+
+            <div class="submit-hint submit-section-hint" id="submitMolecularDynamicsInputHint" hidden></div>
 
             <div class="submit-section-title">MD Settings</div>
 
@@ -435,13 +498,12 @@
                 class="submit-input"
                 id="submitMolecularDynamicsStepCount"
                 data-submit-input="mdStepCount"
-                data-default-value="5"
+                data-default-value="100"
                 type="number"
                 min="1"
                 max="100000"
                 step="1"
               />
-              <div class="submit-hint">Number of velocity Verlet integration steps.</div>
             </div>
 
             <div class="submit-row submit-row--stack">
@@ -450,7 +512,7 @@
                 class="submit-input"
                 id="submitMolecularDynamicsTimeStepFs"
                 data-submit-input="mdTimeStepFs"
-                data-default-value="0.25"
+                data-default-value="0.5"
                 type="number"
                 min="0.001"
                 max="10"
@@ -458,9 +520,9 @@
               />
               <div class="submit-runtime-estimate">
                 <span class="submit-runtime-estimate__label">Total simulation time</span>
-                <span class="submit-runtime-estimate__value" data-submit-bind="mdTotalTimeFs">1.25 fs</span>
+                <span class="submit-runtime-estimate__value" data-submit-bind="mdTotalTimeFs">50 fs</span>
               </div>
-              <div class="submit-hint">Total simulation time is step count multiplied by time step.</div>
+              <div class="submit-hint">More frames may be added to this sim after job is completed.</div>
             </div>
 
             <div class="submit-section-title">Job Settings</div>
@@ -480,7 +542,6 @@
             <div class="submit-row submit-row--stack">
               <div class="submit-row-head">
                 <div class="submit-label" id="submitMolecularDynamicsHardwareLabel">Hardware</div>
-                <div class="submit-row-caption">Longer trajectories cost more, so start small while testing.</div>
               </div>
               <div class="submit-hardware-picker" role="radiogroup" aria-labelledby="submitMolecularDynamicsHardwareLabel">
                 <label class="submit-hardware-option" data-submit-hardware-option data-hardware-tier="budget">
@@ -496,10 +557,9 @@
                   <span class="submit-hardware-option__content">
                     <span class="submit-hardware-option__top">
                       <span class="submit-hardware-option__badge">Budget</span>
-                      <span class="submit-hardware-option__price">$0.002-$0.007 / s</span>
+                      <span class="submit-hardware-option__price">$0.00047/s - $0.00062/s</span>
                     </span>
                     <span class="submit-hardware-option__gpu">RTX 5090 / RTX 4090</span>
-                    <span class="submit-hardware-option__copy">Best for small MD smoke tests and short trajectories.</span>
                   </span>
                 </label>
 
@@ -514,10 +574,9 @@
                   <span class="submit-hardware-option__content">
                     <span class="submit-hardware-option__top">
                       <span class="submit-hardware-option__badge">Performance</span>
-                      <span class="submit-hardware-option__price">$0.01-$0.015 / s</span>
+                      <span class="submit-hardware-option__price">$0.00174/s - $0.00230/s</span>
                     </span>
                     <span class="submit-hardware-option__gpu">H200 / H100</span>
-                    <span class="submit-hardware-option__copy">Use for larger molecules or trajectories that need faster turnaround.</span>
                   </span>
                 </label>
               </div>
@@ -529,7 +588,7 @@
                 class="submit-input"
                 id="submitMolecularDynamicsMaxRuntime"
                 data-submit-input="maxRuntime"
-                data-default-value="10"
+                data-default-value="60"
                 type="number"
                 min="1"
                 max="180"
@@ -537,7 +596,7 @@
               />
               <div class="submit-runtime-estimate">
                 <span class="submit-runtime-estimate__label">Estimated max cost</span>
-                <span class="submit-runtime-estimate__value" data-submit-bind="maxCost">$9.00</span>
+                <span class="submit-runtime-estimate__value" data-submit-bind="maxCost">$2.23</span>
               </div>
               <div class="submit-hint">MD jobs are cancelled after this limit.</div>
             </div>
@@ -545,6 +604,8 @@
         </div>
 
         <div class="submit-error" id="submitError" role="alert"></div>
+          </section>
+        </div>
 
       </div>
 
@@ -611,121 +672,6 @@
     </div>
   </div>
 
-  <!-- Help Overlay -->
-  <div id="molHelpOverlay" class="molhelp-overlay" aria-hidden="true">
-    <div class="molhelp-modal" role="dialog" aria-modal="true" aria-label="How to submit a molecule">
-      <div class="molhelp-header">
-        <div class="molhelp-title">How to submit a molecule</div>
-        <button class="molhelp-close" type="button" id="molHelpCloseBtn" title="Close">×</button>
-      </div>
-
-      <div class="molhelp-body">
-        <div class="molhelp-section">
-          <div class="molhelp-section__title">What Insight reads from your XML</div>
-          <div class="molhelp-text">
-            Insight expects an XML file in the same format PubChem provides. Your XML must have:
-            <ul class="molhelp-list">
-              <li><code class="molhelp-code">PC-Atoms_element</code> — atomic number (e.g. 6 for carbon)</li>
-              <li><code class="molhelp-code">PC-Conformer_x</code> — x coordinates (Å)</li>
-              <li><code class="molhelp-code">PC-Conformer_y</code> — y coordinates (Å)</li>
-              <li><code class="molhelp-code">PC-Conformer_z</code> — z coordinates (Å)</li>
-            </ul>
-            If any of these tags are missing, the upload will fail.
-          </div>
-        </div>
-
-        <div class="molhelp-section">
-          <div class="molhelp-section__title">Structure requirements</div>
-          <div class="molhelp-text">
-            <ul class="molhelp-list">
-              <li>Use atomic numbers (not element symbols). Example: O = 8, H = 1, C = 6.</li>
-              <li>Coordinates should be in <b>Angstrom</b>. Insight converts Å → Bohr internally.</li>
-              <li>All four tag lists should have the same length (one entry per atom).</li>
-              <li>Tag order should correspond by index: the i-th <code class="molhelp-code">PC-Element</code> matches the i-th x/y/z.</li>
-            </ul>
-          </div>
-        </div>
-
-        <div class="molhelp-section">
-          <div class="molhelp-section__title">Example XML</div>
-          <div class="molhelp-text">Acetone:</div>
-          <pre class="molhelp-pre"><code class="molhelp-code">
-          &lt;PC-Compounds&gt;
-            &lt;PC-Atoms_element&gt;
-              &lt;PC-Element&gt;8&lt;/PC-Element&gt;
-              &lt;PC-Element&gt;6&lt;/PC-Element&gt;
-              &lt;PC-Element&gt;6&lt;/PC-Element&gt;
-              &lt;PC-Element&gt;6&lt;/PC-Element&gt;
-              &lt;PC-Element&gt;1&lt;/PC-Element&gt;
-              &lt;PC-Element&gt;1&lt;/PC-Element&gt;
-              &lt;PC-Element&gt;1&lt;/PC-Element&gt;
-              &lt;PC-Element&gt;1&lt;/PC-Element&gt;
-              &lt;PC-Element&gt;1&lt;/PC-Element&gt;
-              &lt;PC-Element&gt;1&lt;/PC-Element&gt;
-            &lt;/PC-Atoms_element&gt;
-
-            &lt;PC-Conformer_x&gt;
-              &lt;PC-Conformer_x_E&gt;0.0003&lt;/PC-Conformer_x_E&gt;
-              &lt;PC-Conformer_x_E&gt;0&lt;/PC-Conformer_x_E&gt;
-              &lt;PC-Conformer_x_E&gt;1.281&lt;/PC-Conformer_x_E&gt;
-              &lt;PC-Conformer_x_E&gt;-1.2813&lt;/PC-Conformer_x_E&gt;
-              &lt;PC-Conformer_x_E&gt;1.3279&lt;/PC-Conformer_x_E&gt;
-              &lt;PC-Conformer_x_E&gt;1.326&lt;/PC-Conformer_x_E&gt;
-              &lt;PC-Conformer_x_E&gt;2.1351&lt;/PC-Conformer_x_E&gt;
-              &lt;PC-Conformer_x_E&gt;-2.1352&lt;/PC-Conformer_x_E&gt;
-              &lt;PC-Conformer_x_E&gt;-1.3284&lt;/PC-Conformer_x_E&gt;
-              &lt;PC-Conformer_x_E&gt;-1.3266&lt;/PC-Conformer_x_E&gt;
-            &lt;/PC-Conformer_x&gt;
-
-            &lt;PC-Conformer_y&gt;
-              &lt;PC-Conformer_y_E&gt;-1.3171&lt;/PC-Conformer_y_E&gt;
-              &lt;PC-Conformer_y_E&gt;-0.0872&lt;/PC-Conformer_y_E&gt;
-              &lt;PC-Conformer_y_E&gt;0.7024&lt;/PC-Conformer_y_E&gt;
-              &lt;PC-Conformer_y_E&gt;0.7019&lt;/PC-Conformer_y_E&gt;
-              &lt;PC-Conformer_y_E&gt;1.3235&lt;/PC-Conformer_y_E&gt;
-              &lt;PC-Conformer_y_E&gt;1.3282&lt;/PC-Conformer_y_E&gt;
-              &lt;PC-Conformer_y_E&gt;0.0196&lt;/PC-Conformer_y_E&gt;
-              &lt;PC-Conformer_y_E&gt;0.0187&lt;/PC-Conformer_y_E&gt;
-              &lt;PC-Conformer_y_E&gt;1.323&lt;/PC-Conformer_y_E&gt;
-              &lt;PC-Conformer_y_E&gt;1.3278&lt;/PC-Conformer_y_E&gt;
-            &lt;/PC-Conformer_y&gt;
-
-            &lt;PC-Conformer_z&gt;
-              &lt;PC-Conformer_z_E&gt;-0.0002&lt;/PC-Conformer_z_E&gt;
-              &lt;PC-Conformer_z_E&gt;0.0006&lt;/PC-Conformer_z_E&gt;
-              &lt;PC-Conformer_z_E&gt;-0.0002&lt;/PC-Conformer_z_E&gt;
-              &lt;PC-Conformer_z_E&gt;-0.0002&lt;/PC-Conformer_z_E&gt;
-              &lt;PC-Conformer_z_E&gt;-0.898&lt;/PC-Conformer_z_E&gt;
-              &lt;PC-Conformer_z_E&gt;0.8945&lt;/PC-Conformer_z_E&gt;
-              &lt;PC-Conformer_z_E&gt;0.0027&lt;/PC-Conformer_z_E&gt;
-              &lt;PC-Conformer_z_E&gt;0.0027&lt;/PC-Conformer_z_E&gt;
-              &lt;PC-Conformer_z_E&gt;-0.898&lt;/PC-Conformer_z_E&gt;
-              &lt;PC-Conformer_z_E&gt;0.8945&lt;/PC-Conformer_z_E&gt;
-            &lt;/PC-Conformer_z&gt;
-          &lt;/PC-Compounds&gt;
-          </code></pre>
-
-          <div class="molhelp-note">
-            Note: These 4 required blocks don't have to be direct children of the root.
-          </div>
-        </div>
-
-        <div class="molhelp-section">
-          <div class="molhelp-section__title">How to submit</div>
-          <div class="molhelp-text">
-            Drag-and-drop a <code class="molhelp-code">.xml</code> file anywhere on the page.
-            After it is detected, the Submit Job modal will show filename and atom count.
-            You can also drop a local <code class="molhelp-code">md_frames.json</code> file to open MD playback without submitting a job.
-          </div>
-        </div>
-      </div>
-
-      <div class="molhelp-footer">
-        <button class="molhelp-btn" type="button" id="molHelpOkBtn">Got it</button>
-      </div>
-    </div>
-  </div>
-
   <div class="stage">
     <canvas id="glcanvas"></canvas>
 
@@ -733,8 +679,7 @@
       <!-- Header -->
       <div id="topbarMount"></div>
 
-      <!-- Submit help button -->
-      <button class="molhelp-fab" type="button" id="molHelpBtn" title="How to submit a molecule" aria-haspopup="dialog">?</button>
+      <button class="template-xml-btn" type="button" id="downloadTemplateXmlBtn">Download template input XML</button>
       
       <!-- Funds box -->
       <div class="fundsbox">
@@ -792,6 +737,13 @@
                 <input class="viz-slider" id="vizPlaybackFpsSlider" type="range" min="1" max="60" step="1" value="12" />
                 <input class="viz-input" id="vizPlaybackFpsInput" type="number" min="1" max="60" step="1" value="12" />
               </div>
+            </div>
+
+            <div class="viz-control viz-force-options" id="vizForceOptions" hidden>
+              <label class="viz-checkbox">
+                <input type="checkbox" id="vizShowForces" value="forces" disabled />
+                <span>Show Forces</span>
+              </label>
             </div>
 
             <div class="viz-playback-actions">
@@ -855,6 +807,8 @@
       
       <div id="loadingText" class="status-text status-box"></div>
 
+      <button class="blank-job-btn" type="button" id="startBlankJobBtn">Start Blank Job</button>
+
     </div>
   </div>
 
@@ -884,7 +838,6 @@
     }
   </script>
 
-  <script type="module" src="/src/demo-banner.js"></script>
   <script type="module" src="/src/require-auth.js"></script>
   <script type="module" src="/src/topbar.js"></script>
   <script type="module" src="/src/molecule-drop.js"></script>

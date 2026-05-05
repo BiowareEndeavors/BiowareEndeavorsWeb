@@ -35,8 +35,9 @@ const elFilter = document.getElementById("jobsStatusFilter");
 const elRefreshBtn = document.getElementById("jobsRefreshBtn");
 
 const elResultWrap = document.getElementById("jobResultWrap");
-const elResultJson = document.getElementById("jobResultJson");
 const elResultCloseBtn = document.getElementById("jobResultCloseBtn");
+const elActionsBody = document.getElementById("jobActionsBody");
+let elOutputSummary = document.getElementById("jobOutputSummary");
 
 const elActionsTitle = document.getElementById("jobActionsTitle");
 const elActionsHint = document.getElementById("jobActionsHint");
@@ -64,9 +65,17 @@ let _jobsById = new Map();
 // currently selected job
 let _selectedJob = null;
 let _visualizedJob = null;
+let _outputSummaryRenderSeq = 0;
 
 // prevent double-binding if topbar:ready fires more than once
 let _topbarBound = false;
+
+if (!elOutputSummary && elActionsBody) {
+  elOutputSummary = document.createElement("div");
+  elOutputSummary.id = "jobOutputSummary";
+  elOutputSummary.className = "job-output";
+  elActionsBody.appendChild(elOutputSummary);
+}
 
 // ------------------------------
 // Public helpers
@@ -222,11 +231,8 @@ function showActions(job) {
   const payload = buildOutputJsonPayload(job);
   const name = getJobDisplayName(job);
   const status = getJobStatus(job);
-  const createdAt = fmtDate(job?.createdAt);
-  const jobType = getJobTypeLabel(job);
   const isGeometryOptimization = isGeometryOptimizationJob(job);
   const isMolecularDynamics = isMolecularDynamicsJob(job);
-  const mdContinuation = getMdContinuation(job);
   const inputXmlPath = getInputXmlPath(job);
   const inputXmlInline = getInputXmlText(job);
   const inputXmlUploadError = String(job?.inputXmlUploadError ?? "").trim();
@@ -235,37 +241,14 @@ function showActions(job) {
     elActionsTitle.textContent = `${name} (${status || "UNKNOWN"})`;
   }
 
-  const hintParts = [];
-  if (jobType) hintParts.push(`Type: ${jobType}`);
-  if (createdAt) hintParts.push(`Created: ${createdAt}`);
-
   const densityPath = job?.densityRef?.path;
   const moleculeSceneSource = getMoleculeSceneSource(job);
   const optimizedGeometryXml = getOptimizedGeometryXml(job);
-  if (!densityPath) {
-    hintParts.push(
-      moleculeSceneSource
-        ? isMolecularDynamics
-          ? "MD trajectory output is available for Ball & Stick playback."
-          : "No density grid attached. Ball-stick preview is available."
-        : isMolecularDynamics
-          ? "No MD trajectory output is attached to this job yet."
-          : "No density grid attached to this job yet."
-    );
-  } else if (moleculeSceneSource) {
-    hintParts.push(isMolecularDynamics ? "MD trajectory playback is available." : "Ball-stick preview is available.");
-  }
-  if (inputXmlUploadError) {
-    hintParts.push(`Input XML upload issue: ${inputXmlUploadError}`);
-  }
-  if (isMolecularDynamics && mdContinuation?.parentJobId) {
-    const rootLabel = mdContinuation.rootJobName || getMdContinuationBaseName(job);
-    hintParts.push(
-      `Continuation ${mdContinuation.segmentIndex || 1} of ${rootLabel || "this MD chain"}.`
-    );
-  }
 
-  if (elActionsHint) elActionsHint.textContent = hintParts.join(" | ");
+  if (elActionsHint) {
+    elActionsHint.textContent = "";
+    elActionsHint.hidden = true;
+  }
 
   if (elVisualizeBtn) {
     const hasVisualization = Boolean(densityPath || moleculeSceneSource);
@@ -303,18 +286,22 @@ function showActions(job) {
         : "No optimized geometry XML available for this job yet.";
   }
 
-  showJson(payload);
+  renderJobOutputSummary(job, payload);
 }
 
 function hideActions() {
   _selectedJob = null;
+  _outputSummaryRenderSeq += 1;
   if (elResultWrap) elResultWrap.classList.remove("is-open");
-  if (elResultJson) {
-    elResultJson.textContent = "";
-    elResultJson.style.display = "none";
+  if (elOutputSummary) {
+    elOutputSummary.innerHTML = "";
+    elOutputSummary.classList.remove("is-loading");
   }
   if (elActionsTitle) elActionsTitle.textContent = "Job";
-  if (elActionsHint) elActionsHint.textContent = "";
+  if (elActionsHint) {
+    elActionsHint.textContent = "";
+    elActionsHint.hidden = true;
+  }
   if (elDownloadInputXmlBtn) {
     elDownloadInputXmlBtn.disabled = true;
     elDownloadInputXmlBtn.title = "Input XML isn't stored for this job.";
@@ -326,25 +313,1121 @@ function hideActions() {
   }
 }
 
-function showJson(obj) {
-  if (!elResultJson) return;
+const JOB_OUTPUT_NUMBER_SOURCE = "[-+]?(?:\\d+\\.?\\d*|\\.\\d+)(?:[eE][-+]?\\d+)?";
+const JOB_OUTPUT_NUMBER_RE = new RegExp(JOB_OUTPUT_NUMBER_SOURCE);
+const JOB_OUTPUT_COLORS = {
+  energy: "#59d9ff",
+  delta: "#f4c767",
+  accent: "#00ff66",
+  muted: "rgba(255,255,255,0.58)",
+};
+const JOB_HARDWARE_RATES = {
+  budget: { maxRate: 0.00062 },
+  performance: { maxRate: 0.00230 },
+};
 
-  const nextText = JSON.stringify(obj ?? {}, null, 2);
-  const previousScrollTop = elResultJson.scrollTop;
-  const previousDistanceFromBottom =
-    elResultJson.scrollHeight - elResultJson.clientHeight - elResultJson.scrollTop;
+function escapeHtml(value) {
+  return String(value ?? "").replace(/[&<>"']/g, (char) => {
+    if (char === "&") return "&amp;";
+    if (char === "<") return "&lt;";
+    if (char === ">") return "&gt;";
+    if (char === '"') return "&quot;";
+    return "&#39;";
+  });
+}
 
-  elResultJson.style.display = "block";
-  if (elResultJson.textContent === nextText) return;
+function normalizeOutputKey(key) {
+  return String(key ?? "").toLowerCase().replace(/[^a-z0-9]+/g, "");
+}
 
-  elResultJson.textContent = nextText;
-
-  if (previousDistanceFromBottom <= 24) {
-    elResultJson.scrollTop = elResultJson.scrollHeight;
-    return;
+function toFiniteNumber(value) {
+  if (typeof value === "number") return Number.isFinite(value) ? value : null;
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      const number = toFiniteNumber(item);
+      if (number !== null) return number;
+    }
+    return null;
   }
 
-  elResultJson.scrollTop = previousScrollTop;
+  if (typeof value === "string") {
+    const match = value.replace(/,/g, "").match(JOB_OUTPUT_NUMBER_RE);
+    if (!match) return null;
+    const number = Number(match[0]);
+    return Number.isFinite(number) ? number : null;
+  }
+
+  if (value && typeof value === "object") {
+    for (const key of ["value", "energy", "hartree", "amount", "seconds"]) {
+      if (Object.prototype.hasOwnProperty.call(value, key)) {
+        const number = toFiniteNumber(value[key]);
+        if (number !== null) return number;
+      }
+    }
+  }
+
+  return null;
+}
+
+function getTimestampMs(value) {
+  try {
+    if (typeof value?.toDate === "function") return value.toDate().getTime();
+  } catch (_) {}
+
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? null : date.getTime();
+}
+
+function formatOutputNumber(value, options = {}) {
+  const number = Number(value);
+  if (!Number.isFinite(number)) return "Not available";
+
+  const digits = Math.max(2, Math.trunc(Number(options.digits) || 5));
+  const abs = Math.abs(number);
+  const signed = Boolean(options.signed);
+  const units = options.units ? ` ${options.units}` : "";
+  let text = "";
+
+  if (abs > 0 && (abs < 0.001 || abs >= 100000)) {
+    text = number.toExponential(Math.min(6, digits));
+  } else {
+    text = number.toLocaleString(undefined, {
+      maximumSignificantDigits: digits,
+      useGrouping: abs >= 10000,
+    });
+  }
+
+  if (signed && number > 0) text = `+${text}`;
+  return `${text}${units}`;
+}
+
+function formatOutputDuration(seconds) {
+  const value = Number(seconds);
+  if (!Number.isFinite(value) || value < 0) return "Not available";
+  if (value < 1) return `${formatOutputNumber(value, { digits: 3 })} s`;
+  if (value < 60) return `${formatOutputNumber(value, { digits: 4 })} s`;
+  const minutes = Math.floor(value / 60);
+  const remaining = Math.round(value % 60);
+  if (minutes < 60) return `${minutes}m ${remaining}s`;
+  const hours = Math.floor(minutes / 60);
+  const mins = minutes % 60;
+  return `${hours}h ${mins}m`;
+}
+
+function formatOutputCurrency(value, options = {}) {
+  const number = Number(value);
+  if (!Number.isFinite(number) || number < 0) return "Not available";
+  const prefix = options.estimated ? "~" : "";
+  return `${prefix}${number.toLocaleString(undefined, {
+    style: "currency",
+    currency: "USD",
+    minimumFractionDigits: number < 1 ? 3 : 2,
+    maximumFractionDigits: number < 1 ? 3 : 2,
+  })}`;
+}
+
+function outputStatHtml(label, value, tone = "") {
+  if (value === null || value === undefined || value === "") return "";
+  const toneClass = tone ? ` job-output-stat--${escapeHtml(tone)}` : "";
+  return `
+    <div class="job-output-stat${toneClass}">
+      <span>${escapeHtml(label)}</span>
+      <strong>${escapeHtml(value)}</strong>
+    </div>
+  `;
+}
+
+function renderStatStrip(stats) {
+  const html = stats
+    .map(([label, value, tone]) => outputStatHtml(label, value, tone))
+    .filter(Boolean)
+    .join("");
+  return html ? `<div class="job-output-stat-strip">${html}</div>` : "";
+}
+
+function outputFactHtml(label, value) {
+  if (value === null || value === undefined || value === "") return "";
+  return `
+    <div class="job-output-fact">
+      <span>${escapeHtml(label)}</span>
+      <strong>${escapeHtml(value)}</strong>
+    </div>
+  `;
+}
+
+function outputPanelHtml(title, subtitle, body, extraClass = "") {
+  const className = extraClass ? ` job-output-panel--${escapeHtml(extraClass)}` : "";
+  return `
+    <section class="job-output-panel${className}">
+      <div class="job-output-panel__head">
+        <span>${escapeHtml(title)}</span>
+        ${subtitle ? `<small>${escapeHtml(subtitle)}</small>` : ""}
+      </div>
+      <div class="job-output-panel__body">${body}</div>
+    </section>
+  `;
+}
+
+function renderJobOutputSummary(job, payload) {
+  if (!elOutputSummary) return;
+
+  const renderSeq = ++_outputSummaryRenderSeq;
+  const status = getJobStatus(job);
+  const summaryRoot = parseJsonObjectCandidate(payload) || payload || {};
+  elOutputSummary.classList.remove("is-loading");
+  elOutputSummary.innerHTML = buildJobOutputSummaryHtml(job, summaryRoot, null);
+
+  const needsResolvedMd =
+    isMolecularDynamicsJob(job) &&
+    getMdFramesRef(job)?.path &&
+    !getMolecularDynamicsScenePayloadFromRoot(summaryRoot, getJobDisplayName(job))?.MolecularDynamics?.frames?.length;
+
+  if (!needsResolvedMd) return;
+
+  elOutputSummary.classList.add("is-loading");
+  resolveMolecularDynamicsOutput(job)
+    .then((resolvedOutput) => {
+      if (renderSeq !== _outputSummaryRenderSeq) return;
+      const selectedId = String(_selectedJob?.id ?? _selectedJob?.jobId ?? "");
+      const jobId = String(job?.id ?? job?.jobId ?? "");
+      if (selectedId && jobId && selectedId !== jobId) return;
+      elOutputSummary.classList.remove("is-loading");
+      elOutputSummary.innerHTML = buildJobOutputSummaryHtml(
+        job,
+        resolvedOutput?.root || summaryRoot,
+        resolvedOutput
+      );
+    })
+    .catch((err) => {
+      if (renderSeq !== _outputSummaryRenderSeq) return;
+      elOutputSummary.classList.remove("is-loading");
+      elOutputSummary.innerHTML = buildJobOutputSummaryHtml(job, summaryRoot, null, {
+        note: `Trajectory preview unavailable: ${err?.message || String(err)}`,
+      });
+      if (status !== "IN_QUEUE") {
+        console.warn("Unable to resolve MD output summary:", err);
+      }
+    });
+}
+
+function buildJobOutputSummaryHtml(job, root, resolvedOutput = null, options = {}) {
+  const status = getJobStatus(job);
+  const typeLabel = getJobTypeLabel(job) || "Job";
+  const statusTone = getStatusTone(status);
+  const createdAt = fmtDate(job?.createdAt);
+  const atomCount = Math.max(0, Math.trunc(Number(job?.nAtoms ?? job?.n_atoms) || 0));
+  const overviewMeta = [
+    atomCount ? `${atomCount} atoms` : "",
+    createdAt ? `Created ${createdAt}` : "",
+  ].filter(Boolean).join(" | ");
+
+  const specificHtml = isMolecularDynamicsJob(job)
+    ? buildMdOutputSummaryHtml(job, root, resolvedOutput)
+    : isGeometryOptimizationJob(job)
+      ? buildGeometryOutputSummaryHtml(job, root)
+      : buildPointSolveOutputSummaryHtml(job, root);
+
+  const noteHtml = options.note
+    ? `<div class="job-output-note">${escapeHtml(options.note)}</div>`
+    : "";
+
+  return `
+    <div class="job-output-overview">
+      <div class="job-output-overview__main">
+        <div class="job-output-kicker">${escapeHtml(typeLabel)} Output</div>
+        ${overviewMeta ? `<div class="job-output-overview__meta">${escapeHtml(overviewMeta)}</div>` : ""}
+      </div>
+      <span class="job-output-chip job-output-chip--${escapeHtml(statusTone || "neutral")}">
+        ${escapeHtml(toTitleLabel(status) || "Unknown")}
+      </span>
+    </div>
+    ${noteHtml}
+    ${specificHtml}
+  `;
+}
+
+function getStatusTone(status) {
+  const normalized = String(status || "").toUpperCase();
+  if (normalized === "COMPLETED" || normalized === "SUCCEEDED") return "good";
+  if (normalized === "FAILED" || normalized === "CANCELLED" || normalized === "TIMED_OUT") return "bad";
+  if (normalized === "IN_PROGRESS" || normalized === "IN-PROGRESS") return "active";
+  if (normalized === "IN_QUEUE") return "queued";
+  return "";
+}
+
+function buildPointSolveOutputSummaryHtml(job, root) {
+  const scf = extractScfIterations(root);
+  const components = extractEnergyComponents(root);
+  const latest = scf.length ? scf[scf.length - 1] : null;
+  const finalEnergy =
+    findEnergyComponent(components, "TotalEnergy") ??
+    readNestedNumber(root, ["finalTotalEnergyHartree", "totalEnergyHartree", "total_energy_hartree"]) ??
+    latest?.energy;
+  const stats = buildJobStats(job, root, [
+    ["Energy", formatOutputNumber(finalEnergy, { digits: 9, units: "Ha" })],
+    ["SCF", scf.length ? String(scf.length) : "Not available"],
+  ]);
+
+  const energyPoints = scf
+    .filter((item) => Number.isFinite(item.energy))
+    .map((item) => ({ x: item.iteration, y: item.energy }));
+  const totalEnergyPoints = omitFirstChartPoint(energyPoints);
+
+  const panels = [
+    outputPanelHtml(
+      "Total Energy",
+      totalEnergyPoints.length ? "First SCF point omitted" : "No SCF trace",
+      renderLineChart([{ name: "Total Energy", color: JOB_OUTPUT_COLORS.energy, points: totalEnergyPoints }], {
+        empty: "No chartable SCF energy data yet.",
+        xLabel: "SCF iteration",
+        yLabel: "Energy",
+        yUnits: "Ha",
+        pointXLabel: "SCF iteration",
+        pointYLabel: "Energy",
+      }),
+      "wide"
+    ),
+  ].join("");
+
+  return `
+    ${renderStatStrip(stats)}
+    <div class="job-output-grid">${panels}</div>
+  `;
+}
+
+function buildGeometryOutputSummaryHtml(job, root) {
+  const go = getGeometryOptimizationObject(root) || {};
+  const goIterations = extractGeometryIterations(root);
+  const components = extractEnergyComponents(root);
+  const optimizedGeometryXml = getOptimizedGeometryXml(job);
+  const latest = goIterations.length ? goIterations[goIterations.length - 1] : null;
+  const progress = go?.iterationProgress || go?.iteration_progress || {};
+  const reportedIterationCount = toFiniteNumber(go.iterationCount ?? go.iteration_count ?? progress.iterationsDone);
+  const iterationCount = Math.max(
+    goIterations.length,
+    Math.trunc(Number(reportedIterationCount) || 0)
+  );
+  const finalEnergy =
+    latest?.energy ??
+    toFiniteNumber(progress.latestEnergyHartree ?? progress.latest_energy_hartree) ??
+    findEnergyComponent(components, "TotalEnergy") ??
+    readNestedNumber(root, ["finalEnergyHartree", "finalTotalEnergyHartree", "totalEnergyHartree"]);
+  const geometryState = optimizedGeometryXml
+    ? "Ready"
+    : getJobStatus(job) === "IN_PROGRESS"
+      ? "Optimizing"
+      : "Pending";
+  const stats = buildJobStats(job, root, [
+    ["Geometry", geometryState, optimizedGeometryXml ? "good" : getJobStatus(job) === "IN_PROGRESS" ? "active" : ""],
+    ["Energy", formatOutputNumber(finalEnergy, { digits: 9, units: "Ha" })],
+    ["GO Iterations", iterationCount ? String(iterationCount) : "Not available"],
+  ]);
+
+  const energyPoints = goIterations
+    .filter((item) => Number.isFinite(item.energy))
+    .map((item) => ({ x: item.iteration, y: item.energy }));
+  const goStatus = String(go.status || "").trim();
+  const latestPhase = String(latest?.phase || "").trim();
+  const latestStrategy = String(latest?.stepStrategy || "").trim();
+  const activeAtoms = latest?.activeAtomCount && latest?.activeAtomTotal
+    ? `${latest.activeAtomCount}/${latest.activeAtomTotal}`
+    : "";
+
+  const panels = [
+    outputPanelHtml(
+      "GO Energy",
+      energyPoints.length ? `${energyPoints.length} optimization evaluations` : "No GO trace",
+      renderLineChart([{ name: "GO Energy", color: JOB_OUTPUT_COLORS.energy, points: energyPoints }], {
+        empty: "No optimization energy trace found yet.",
+        xLabel: "GO iteration",
+        yLabel: "Energy",
+        yUnits: "Ha",
+        pointXLabel: "GO iteration",
+        pointYLabel: "Energy",
+      }),
+      "wide"
+    ),
+    outputPanelHtml(
+      "Optimization Step",
+      goStatus ? toTitleLabel(goStatus) : "",
+      renderFacts([
+        ["Latest Iteration", latest ? String(latest.iteration) : ""],
+        ["Phase", latestPhase ? toTitleLabel(latestPhase) : ""],
+        ["Strategy", latestStrategy ? toTitleLabel(latestStrategy) : ""],
+        ["Max Force", latest?.maxForce !== null && latest?.maxForce !== undefined ? formatOutputNumber(latest.maxForce, { digits: 5 }) : ""],
+        ["RMS Force", latest?.rmsForce !== null && latest?.rmsForce !== undefined ? formatOutputNumber(latest.rmsForce, { digits: 5 }) : ""],
+        ["Active Atoms", activeAtoms],
+      ])
+    ),
+  ].join("");
+
+  return `
+    ${renderStatStrip(stats)}
+    <div class="job-output-grid">${panels}</div>
+  `;
+}
+
+function getGeometryOptimizationObject(root) {
+  const parsedRoot = parseJsonObjectCandidate(root);
+  if (!parsedRoot) return null;
+
+  const directCandidates = [
+    parsedRoot.GeometryOptimization,
+    parsedRoot.result?.GeometryOptimization,
+    parsedRoot.output?.GeometryOptimization,
+    parsedRoot.partialResult?.GeometryOptimization,
+    parsedRoot.data?.GeometryOptimization,
+    parsedRoot.response?.GeometryOptimization,
+    parsedRoot.runpod?.output?.GeometryOptimization,
+    parsedRoot.runpod?.result?.GeometryOptimization,
+    parsedRoot.upstream?.output?.GeometryOptimization,
+    parsedRoot.upstream?.result?.GeometryOptimization,
+  ];
+
+  for (const candidate of directCandidates) {
+    if (candidate && typeof candidate === "object" && !Array.isArray(candidate)) {
+      return candidate;
+    }
+  }
+
+  const nested = findNestedObjectValueByKey(parsedRoot, "GeometryOptimization");
+  return nested && typeof nested === "object" && !Array.isArray(nested) ? nested : null;
+}
+
+function parseGeometryIteration(item, index) {
+  if (!item || typeof item !== "object") return null;
+
+  const energy = toFiniteNumber(
+    item.energyHartree ??
+      item.energy_hartree ??
+      item.energy ??
+      item.totalEnergyHartree ??
+      item.total_energy_hartree
+  );
+  const iteration = toFiniteNumber(item.iteration ?? item.goIteration ?? item.go_iteration ?? item.step);
+  const maxForce = toFiniteNumber(item.maxForce ?? item.max_force);
+  const rmsForce = toFiniteNumber(item.rmsForce ?? item.rms_force);
+  const scaledEnergyDelta = toFiniteNumber(item.scaledEnergyDelta ?? item.scaled_energy_delta);
+  const maxDisplacement = toFiniteNumber(item.maxDisplacement ?? item.max_displacement);
+  const rmsDisplacement = toFiniteNumber(item.rmsDisplacement ?? item.rms_displacement);
+  const activeAtomCount = toFiniteNumber(item.activeAtomCount ?? item.active_atom_count);
+  const activeAtomTotal = toFiniteNumber(item.activeAtomTotal ?? item.active_atom_total);
+
+  if (energy === null && maxForce === null && rmsForce === null) return null;
+
+  return {
+    iteration: Number.isFinite(iteration) ? iteration : index,
+    bfgsIteration: toFiniteNumber(item.bfgsIteration ?? item.bfgs_iteration),
+    phase: item.phase,
+    stepStrategy: item.stepStrategy ?? item.step_strategy,
+    activeAtomCount: activeAtomCount === null ? null : Math.trunc(activeAtomCount),
+    activeAtomTotal: activeAtomTotal === null ? null : Math.trunc(activeAtomTotal),
+    acceptedAlpha: toFiniteNumber(item.acceptedAlpha ?? item.accepted_alpha),
+    energy,
+    maxForce,
+    rmsForce,
+    scaledEnergyDelta,
+    maxDisplacement,
+    rmsDisplacement,
+  };
+}
+
+function extractGeometryIterations(root) {
+  const go = getGeometryOptimizationObject(root);
+  if (!go) return [];
+
+  const candidates = [
+    go.iterations,
+    go.energyTrace,
+    go.energy_trace,
+  ].filter(Array.isArray);
+
+  const raw = candidates.find((items) => items.some((item) => Boolean(parseGeometryIteration(item, 0)))) || [];
+  return raw
+    .map((item, index) => parseGeometryIteration(item, index))
+    .filter(Boolean);
+}
+
+function buildMdOutputSummaryHtml(job, root, resolvedOutput = null) {
+  const label = getJobDisplayName(job);
+  const scenePayload =
+    resolvedOutput?.scenePayload ||
+    getMolecularDynamicsScenePayloadFromRoot(root, label) ||
+    getMolecularDynamicsScenePayload(job);
+  const md = scenePayload?.MolecularDynamics || getMolecularDynamicsObject(root) || {};
+  const frames = Array.isArray(md.frames) ? md.frames : [];
+  const finalFrame = frames.length ? frames[frames.length - 1] : null;
+
+  const frameProgress = md.frameProgress || md.frame_progress || {};
+  const progressFramesDone = toFiniteNumber(
+    frameProgress.framesDone ??
+      frameProgress.frames_done
+  );
+  const progressFramesExpected = toFiniteNumber(
+    frameProgress.framesExpected ??
+      frameProgress.frames_expected
+  );
+  const reportedTrajectoryFramesDone = toFiniteNumber(
+    frameProgress.trajectoryFramesDone ??
+      frameProgress.trajectory_frames_done ??
+      md.framesDone ??
+      md.frames_done
+  );
+  const reportedTrajectoryFramesExpected = toFiniteNumber(
+    frameProgress.trajectoryFramesExpected ??
+      frameProgress.trajectory_frames_expected ??
+      md.framesExpected ??
+      md.frames_expected
+  );
+  const configuredStepCount = Math.trunc(Number(md.stepCount ?? md.step_count ?? job?.mdConfig?.stepCount ?? job?.md_config?.step_count) || 0);
+  const trajectoryFrameCount = Math.max(
+    frames.length,
+    Math.trunc(Number(md.trajectoryFrameCount ?? md.trajectory_frame_count) || 0),
+    Math.trunc(Number(md.frameCount ?? md.frame_count) || 0),
+    Math.trunc(Number(frameProgress.trajectoryFramesDone ?? frameProgress.trajectory_frames_done) || 0),
+    Math.trunc(Number(reportedTrajectoryFramesDone) || 0)
+  );
+  const generatedFramesDone = toFiniteNumber(
+    progressFramesDone ??
+      frameProgress.generatedFramesDone ??
+      frameProgress.generated_frames_done ??
+      md.generatedFramesDone ??
+      md.generated_frames_done ??
+      md.completedStepCount ??
+      md.completed_step_count
+  );
+  const generatedFramesExpected = toFiniteNumber(
+    progressFramesExpected ??
+      frameProgress.generatedFramesExpected ??
+      frameProgress.generated_frames_expected ??
+      md.generatedFramesExpected ??
+      md.generated_frames_expected
+  );
+  const frameCount = Math.max(
+    0,
+    Math.trunc(Number(generatedFramesDone) || 0),
+    trajectoryFrameCount > 0 ? trajectoryFrameCount - 1 : 0,
+    reportedTrajectoryFramesDone !== null ? Math.max(0, Math.trunc(reportedTrajectoryFramesDone) - 1) : 0
+  );
+  const expectedFrameCount = Math.max(
+    0,
+    Math.trunc(Number(generatedFramesExpected) || 0) ||
+      configuredStepCount ||
+      (reportedTrajectoryFramesExpected !== null ? Math.max(0, Math.trunc(reportedTrajectoryFramesExpected) - 1) : 0)
+  );
+  const completedFrameCount = Math.min(
+    expectedFrameCount || Number.POSITIVE_INFINITY,
+    frameCount
+  );
+  const completedStepCount = completedFrameCount;
+  const timeStepFs = toFiniteNumber(md.timeStepFs ?? md.time_step_fs ?? job?.mdConfig?.timeStepFs);
+  const finalTimeFs =
+    toFiniteNumber(finalFrame?.timeFs ?? finalFrame?.time_fs) ??
+    (timeStepFs !== null && completedStepCount ? timeStepFs * completedStepCount : null);
+  const framesRef = getMdFramesRef(job);
+  const hasPlayback = frames.length > 0 || Boolean(framesRef?.path);
+  const hasFrameProgress = completedFrameCount > 0 || expectedFrameCount > 0;
+  const trajectoryState = hasPlayback
+    ? "Ready"
+    : hasFrameProgress
+      ? "Generating"
+      : "Waiting";
+  const frameDisplay = expectedFrameCount
+    ? `${completedFrameCount}/${expectedFrameCount}`
+    : frameCount ? String(frameCount) : "Not available";
+
+  const stats = buildJobStats(job, root, [
+    ["Trajectory", trajectoryState, hasPlayback ? "good" : hasFrameProgress ? "active" : ""],
+    ["Frames", frameDisplay],
+    ["Sim Time", finalTimeFs !== null ? formatOutputNumber(finalTimeFs, { digits: 5, units: "fs" }) : "Not available"],
+  ]);
+
+  const panels = [
+    outputPanelHtml(
+      "Trajectory Progress",
+      completedFrameCount || expectedFrameCount ? `${completedFrameCount || 0}/${expectedFrameCount || "?"} frames` : "",
+      renderProgressMeter(completedFrameCount, expectedFrameCount, { unit: "frames" }) +
+        renderFacts([
+          ["Frames", frameDisplay === "Not available" ? "" : frameDisplay],
+          ["Time Step", timeStepFs !== null ? `${formatOutputNumber(timeStepFs, { digits: 4 })} fs` : ""],
+          ["Playback", hasPlayback ? "Available" : hasFrameProgress ? "Available when complete" : "Waiting for frames"],
+        ]),
+      "wide"
+    ),
+  ].join("");
+
+  return `
+    ${renderStatStrip(stats)}
+    <div class="job-output-grid">${panels}</div>
+  `;
+}
+
+function walkOutputTree(root, visitor, options = {}) {
+  if (!root || typeof root !== "object") return;
+
+  const includeHeavy = Boolean(options.includeHeavy);
+  const maxVisits = Math.max(200, Math.trunc(Number(options.maxVisits) || 1800));
+  const seen = new Set();
+  const stack = [{ value: root, key: "", depth: 0 }];
+  let visits = 0;
+
+  while (stack.length && visits < maxVisits) {
+    const item = stack.pop();
+    const value = item.value;
+    if (!value || typeof value !== "object" || seen.has(value)) continue;
+    seen.add(value);
+    visits += 1;
+
+    visitor(value, item.key, item.depth);
+
+    if (Array.isArray(value)) {
+      const maxIndex = includeHeavy ? value.length - 1 : Math.min(value.length - 1, 60);
+      for (let i = maxIndex; i >= 0; i -= 1) {
+        stack.push({ value: value[i], key: item.key, depth: item.depth + 1 });
+      }
+      continue;
+    }
+
+    for (const [childKey, childValue] of Object.entries(value)) {
+      const normalized = normalizeOutputKey(childKey);
+      if (
+        !includeHeavy &&
+        (normalized === "frames" ||
+          normalized === "positions" ||
+          normalized === "velocities" ||
+          normalized === "forces" ||
+          normalized === "gradients")
+      ) {
+        continue;
+      }
+      stack.push({ value: childValue, key: childKey, depth: item.depth + 1 });
+    }
+  }
+}
+
+function findNestedObjectByKeys(root, keyNames) {
+  const targets = new Set(keyNames.map(normalizeOutputKey));
+  let found = null;
+
+  walkOutputTree(root, (value) => {
+    if (found || !value || typeof value !== "object" || Array.isArray(value)) return;
+    for (const [key, childValue] of Object.entries(value)) {
+      if (
+        targets.has(normalizeOutputKey(key)) &&
+        childValue &&
+        typeof childValue === "object" &&
+        !Array.isArray(childValue)
+      ) {
+        found = childValue;
+        return;
+      }
+    }
+  });
+
+  return found;
+}
+
+function findNestedArrayByKeys(root, keyNames, itemPredicate = null) {
+  const targets = new Set(keyNames.map(normalizeOutputKey));
+  let found = null;
+
+  walkOutputTree(root, (value) => {
+    if (found || !value || typeof value !== "object" || Array.isArray(value)) return;
+    for (const [key, childValue] of Object.entries(value)) {
+      if (!targets.has(normalizeOutputKey(key)) || !Array.isArray(childValue)) continue;
+      if (!itemPredicate || childValue.some(itemPredicate)) {
+        found = childValue;
+        return;
+      }
+    }
+  });
+
+  return found;
+}
+
+function parseKeyValueNumbers(text) {
+  const source = String(text || "");
+  const pairs = {};
+  const equalsRe = new RegExp(`([A-Za-z][A-Za-z0-9 _()%/-]*)\\s*=\\s*\\$?\\s*(${JOB_OUTPUT_NUMBER_SOURCE})`, "g");
+  const colonRe = new RegExp(`([A-Za-z][A-Za-z0-9 _()%/-]*)\\s*:\\s*\\$?\\s*(${JOB_OUTPUT_NUMBER_SOURCE})`, "g");
+
+  let match = equalsRe.exec(source);
+  while (match) {
+    pairs[normalizeOutputKey(match[1])] = Number(match[2]);
+    match = equalsRe.exec(source);
+  }
+
+  match = colonRe.exec(source);
+  while (match) {
+    pairs[normalizeOutputKey(match[1])] = Number(match[2]);
+    match = colonRe.exec(source);
+  }
+
+  return pairs;
+}
+
+function numberFromNormalizedMap(map, keys) {
+  for (const key of keys) {
+    const value = map[normalizeOutputKey(key)];
+    if (Number.isFinite(value)) return value;
+  }
+  return null;
+}
+
+function parseScfIteration(item, index) {
+  let values = {};
+
+  if (typeof item === "string") {
+    values = parseKeyValueNumbers(item);
+  } else if (item && typeof item === "object") {
+    for (const [key, value] of Object.entries(item)) {
+      const number = toFiniteNumber(value);
+      if (number !== null) values[normalizeOutputKey(key)] = number;
+    }
+  }
+
+  const energy = numberFromNormalizedMap(values, [
+    "E",
+    "energy",
+    "totalEnergy",
+    "totalEnergyHartree",
+    "electronicEnergy",
+  ]);
+  const deltaEnergy = numberFromNormalizedMap(values, [
+    "dE",
+    "deltaE",
+    "energyDelta",
+    "deltaEnergy",
+    "deltaEnergyHartree",
+  ]);
+  const mixingParam = numberFromNormalizedMap(values, ["mixingParam", "mixing", "mix"]);
+  const step = numberFromNormalizedMap(values, ["iteration", "iter", "step", "frame"]);
+
+  if (energy === null && deltaEnergy === null) return null;
+
+  return {
+    iteration: Number.isFinite(step) && step > 0 ? step : index + 1,
+    energy,
+    deltaEnergy,
+    mixingParam,
+  };
+}
+
+function extractScfIterations(root) {
+  const scfSection = findNestedObjectByKeys(root, ["SCF", "scf"]);
+  const candidates = [
+    scfSection?.Iterations,
+    scfSection?.iterations,
+    findNestedArrayByKeys(scfSection, ["Iterations", "iterations"], (item) => Boolean(parseScfIteration(item, 0))),
+    findNestedArrayByKeys(root, ["SCFIterations", "scf_iterations", "Iterations", "iterations"], (item) => Boolean(parseScfIteration(item, 0))),
+  ].filter(Array.isArray);
+
+  const raw = candidates.find((items) => items.some((item) => Boolean(parseScfIteration(item, 0)))) || [];
+  return raw
+    .map((item, index) => parseScfIteration(item, index))
+    .filter(Boolean);
+}
+
+function extractEnergyComponents(root) {
+  const section = findNestedObjectByKeys(root, ["TotalEnergy", "total_energy", "EnergyComponents", "energy_components"]);
+  if (!section || typeof section !== "object" || Array.isArray(section)) return [];
+
+  return Object.entries(section)
+    .map(([key, value]) => ({
+      label: toTitleLabel(key),
+      rawLabel: key,
+      value: toFiniteNumber(value),
+    }))
+    .filter((item) => item.value !== null && !/%|difference/i.test(item.rawLabel))
+    .slice(0, 12);
+}
+
+function findEnergyComponent(components, label) {
+  const target = normalizeOutputKey(label);
+  const match = components.find((item) => normalizeOutputKey(item.rawLabel) === target);
+  return match?.value ?? null;
+}
+
+function readNestedNumber(root, keyNames) {
+  const targets = new Set(keyNames.map(normalizeOutputKey));
+  let found = null;
+
+  walkOutputTree(root, (value) => {
+    if (found !== null || !value || typeof value !== "object" || Array.isArray(value)) return;
+    for (const [key, childValue] of Object.entries(value)) {
+      if (!targets.has(normalizeOutputKey(key))) continue;
+      const number = toFiniteNumber(childValue);
+      if (number !== null) {
+        found = number;
+        return;
+      }
+    }
+  });
+
+  return found;
+}
+
+function readOwnLabeledNumber(root, keyNames) {
+  if (!root || typeof root !== "object" || Array.isArray(root)) return null;
+
+  const targets = new Set(keyNames.map(normalizeOutputKey));
+  for (const [key, value] of Object.entries(root)) {
+    if (!targets.has(normalizeOutputKey(key))) continue;
+    const number = toFiniteNumber(value);
+    if (number !== null) return number;
+  }
+
+  return null;
+}
+
+function readNestedLabeledNumber(root, keyNames) {
+  const targets = new Set(keyNames.map(normalizeOutputKey));
+  let found = null;
+  const inspectCandidate = (candidate) => {
+    if (found !== null) return;
+    if (typeof candidate === "string") {
+      const parsed = parseKeyValueNumbers(candidate);
+      for (const target of targets) {
+        if (Number.isFinite(parsed[target])) {
+          found = parsed[target];
+          return;
+        }
+      }
+      return;
+    }
+
+    const number = toFiniteNumber(candidate);
+    if (number !== null) found = number;
+  };
+
+  walkOutputTree(root, (value) => {
+    if (found !== null || !value || typeof value !== "object") return;
+
+    if (Array.isArray(value)) {
+      for (const item of value) {
+        if (typeof item === "string") inspectCandidate(item);
+        if (found !== null) return;
+      }
+      return;
+    }
+
+    for (const [key, childValue] of Object.entries(value)) {
+      if (!targets.has(normalizeOutputKey(key))) continue;
+      inspectCandidate(childValue);
+      if (found !== null) return;
+    }
+  });
+
+  return found;
+}
+
+function getJobCostUsd(job, root) {
+  return (
+    readOwnLabeledNumber(job, [
+      "totalCostUsd",
+      "costUsd",
+      "billedUsd",
+      "billingCostUsd",
+      "chargedUsd",
+      "amountUsd",
+      "creditsCharged",
+      "cost",
+    ]) ??
+    readNestedLabeledNumber(root, [
+      "totalCostUsd",
+      "costUsd",
+      "billedUsd",
+      "billingCostUsd",
+      "chargedUsd",
+      "amountUsd",
+      "creditsCharged",
+      "cost",
+    ])
+  );
+}
+
+function getJobTotalTimeSeconds(job, root) {
+  const readResultTotalSeconds = () => {
+    const resultSeconds = readNestedLabeledNumber(root, [
+      "totalTimeSec",
+      "totalTimeSeconds",
+      "totalRuntimeSec",
+      "totalRuntimeSeconds",
+      "totalGoTime",
+      "totalMdTime",
+      "totalJobTime",
+      "totalTime",
+    ]);
+    if (resultSeconds !== null) return resultSeconds;
+
+    const resultMs = readNestedLabeledNumber(root, ["totalTimeMs"]);
+    return resultMs !== null ? resultMs / 1000 : null;
+  };
+
+  const jobSeconds = readOwnLabeledNumber(job, [
+    "totalTimeSec",
+    "totalTimeSeconds",
+    "totalRuntimeSec",
+    "totalRuntimeSeconds",
+    "runtimeSec",
+    "runtimeSeconds",
+    "durationSec",
+    "durationSeconds",
+    "elapsedSec",
+    "elapsedSeconds",
+    "executionTimeSec",
+    "wallTimeSec",
+    "walltimeSec",
+  ]);
+  if (jobSeconds !== null) return jobSeconds;
+
+  const jobMs = readOwnLabeledNumber(job, ["totalTimeMs", "runtimeMs", "durationMs", "elapsedMs", "executionTimeMs"]);
+  if (jobMs !== null) return jobMs / 1000;
+
+  const status = getJobStatus(job);
+  if (status === "IN_QUEUE") return null;
+
+  const startedMs =
+    getTimestampMs(job?.startedAt ?? job?.started_at ?? job?.runStartedAt ?? job?.run_started_at) ??
+    getTimestampMs(job?.createdAt ?? job?.created_at);
+  if (startedMs === null) return readResultTotalSeconds();
+
+  const isTerminal = ["COMPLETED", "SUCCEEDED", "FAILED", "CANCELLED", "TIMED_OUT"].includes(status);
+  const endedMs = isTerminal
+    ? (
+        getTimestampMs(job?.completedAt ?? job?.completed_at) ??
+        getTimestampMs(job?.finishedAt ?? job?.finished_at) ??
+        getTimestampMs(job?.endedAt ?? job?.ended_at) ??
+        getTimestampMs(job?.cancelledAt ?? job?.cancelled_at) ??
+        getTimestampMs(job?.updatedAt ?? job?.updated_at)
+      )
+    : Date.now();
+
+  if (endedMs === null || endedMs < startedMs) return readResultTotalSeconds();
+  const timestampSeconds = (endedMs - startedMs) / 1000;
+  if (timestampSeconds > 0) return timestampSeconds;
+  return readResultTotalSeconds();
+}
+
+function getJobHardwareRate(job) {
+  const tier = String(job?.hardwareTier ?? job?.hardware_tier ?? "").trim().toLowerCase();
+  return JOB_HARDWARE_RATES[tier]?.maxRate ?? null;
+}
+
+function buildJobStats(job, root, stats = []) {
+  const totalTimeSeconds = getJobTotalTimeSeconds(job, root);
+  const explicitCostUsd = getJobCostUsd(job, root);
+  const hardwareRate = getJobHardwareRate(job);
+  const estimatedCostUsd =
+    explicitCostUsd === null && totalTimeSeconds !== null && hardwareRate !== null
+      ? totalTimeSeconds * hardwareRate
+      : null;
+
+  return [
+    ...stats,
+    ["Total Time", totalTimeSeconds === null ? (getJobStatus(job) === "IN_QUEUE" ? "Queued" : "Not available") : formatOutputDuration(totalTimeSeconds)],
+    ["Cost", explicitCostUsd !== null
+      ? formatOutputCurrency(explicitCostUsd)
+      : estimatedCostUsd !== null
+        ? formatOutputCurrency(estimatedCostUsd, { estimated: true })
+        : getJobStatus(job) === "IN_QUEUE"
+          ? "$0.000"
+          : "Not available"],
+  ];
+}
+
+function renderFacts(facts) {
+  const html = facts
+    .map(([label, value]) => outputFactHtml(label, value))
+    .filter(Boolean)
+    .join("");
+  return html ? `<div class="job-output-facts">${html}</div>` : `<div class="job-output-empty">No details available yet.</div>`;
+}
+
+function renderProgressMeter(value, max, options = {}) {
+  const current = Math.max(0, Number(value) || 0);
+  const target = Math.max(0, Number(max) || 0);
+  const percent = target > 0 ? Math.max(0, Math.min(100, (current / target) * 100)) : current > 0 ? 100 : 0;
+  const unit = String(options.unit || "steps").trim() || "steps";
+  const label = target > 0
+    ? `${Math.trunc(current)}/${Math.trunc(target)} ${unit} (${Math.round(percent)}%)`
+    : current > 0
+      ? `${Math.trunc(current)} ${unit}`
+      : "Waiting";
+
+  return `
+    <div class="job-output-progress">
+      <div class="job-output-progress__track">
+        <span class="job-output-progress__fill" style="width:${percent.toFixed(2)}%"></span>
+      </div>
+      <div class="job-output-progress__label">${escapeHtml(label)}</div>
+    </div>
+  `;
+}
+
+function omitFirstChartPoint(points) {
+  const finitePoints = points.filter((point) => Number.isFinite(point.x) && Number.isFinite(point.y));
+  return finitePoints.length > 1 ? finitePoints.slice(1) : [];
+}
+
+function downsamplePoints(points, maxPoints = 180) {
+  if (points.length <= maxPoints) return points;
+  const sampled = [];
+  const step = (points.length - 1) / (maxPoints - 1);
+  for (let i = 0; i < maxPoints; i += 1) {
+    sampled.push(points[Math.round(i * step)]);
+  }
+  return sampled;
+}
+
+function formatChartValue(value, options = {}) {
+  const number = Number(value);
+  if (!Number.isFinite(number)) return "";
+  const units = options.units ? ` ${options.units}` : "";
+  const digits = Math.max(2, Math.trunc(Number(options.digits) || 5));
+  const abs = Math.abs(number);
+  let text = "";
+
+  if (Number.isInteger(number) && abs < 100000) {
+    text = number.toLocaleString();
+  } else if (abs > 0 && (abs < 0.001 || abs >= 100000)) {
+    text = number.toExponential(Math.min(5, digits));
+  } else {
+    text = number.toLocaleString(undefined, {
+      maximumSignificantDigits: digits,
+      useGrouping: abs >= 10000,
+    });
+  }
+
+  return `${text}${units}`;
+}
+
+function formatChartTooltip(seriesName, point, options = {}) {
+  const xLabel = String(options.pointXLabel || options.xLabel || "X").trim();
+  const yLabel = String(options.pointYLabel || options.yLabel || seriesName || "Value").trim();
+  const xText = formatChartValue(point.x, { digits: options.xDigits || 5, units: options.xUnits || "" });
+  const yText = formatChartValue(point.y, { digits: options.yDigits || 9, units: options.yUnits || "" });
+  return `${seriesName || "Series"}\n${xLabel}: ${xText}\n${yLabel}: ${yText}`;
+}
+
+function renderLineChart(series, options = {}) {
+  const normalizedSeries = series
+    .map((item) => {
+      const rawPoints = (item.points || []).filter((point) => Number.isFinite(point.x) && Number.isFinite(point.y));
+      return {
+        ...item,
+        points: downsamplePoints(rawPoints),
+      };
+    })
+    .filter((item) => item.points.length);
+
+  if (!normalizedSeries.length) {
+    return `<div class="job-output-empty">${escapeHtml(options.empty || "No chart data available.")}</div>`;
+  }
+
+  const allPoints = normalizedSeries.flatMap((item) => item.points);
+  const minX = Math.min(...allPoints.map((point) => point.x));
+  const maxX = Math.max(...allPoints.map((point) => point.x));
+  let minY = Math.min(...allPoints.map((point) => point.y));
+  let maxY = Math.max(...allPoints.map((point) => point.y));
+
+  if (minY === maxY) {
+    const pad = Math.max(Math.abs(minY) * 0.01, 1e-6);
+    minY -= pad;
+    maxY += pad;
+  } else {
+    const pad = (maxY - minY) * 0.08;
+    minY -= pad;
+    maxY += pad;
+  }
+
+  const chart = { left: 58, right: 14, top: 18, bottom: 40, width: 360, height: 184 };
+  const plotWidth = chart.width - chart.left - chart.right;
+  const plotHeight = chart.height - chart.top - chart.bottom;
+  const xSpan = maxX === minX ? 1 : maxX - minX;
+  const ySpan = maxY - minY;
+  const xFor = (x) => chart.left + ((x - minX) / xSpan) * plotWidth;
+  const yFor = (y) => chart.top + (1 - (y - minY) / ySpan) * plotHeight;
+  const midX = minX + xSpan / 2;
+  const midY = minY + ySpan / 2;
+  const yTicks = [maxY, midY, minY];
+  const xTicks = maxX === minX ? [minX] : [minX, midX, maxX];
+  const xLabel = String(options.xLabel || "").trim();
+  const yLabel = String(options.yLabel || "").trim();
+  const yUnits = String(options.yUnits || "").trim();
+  const xUnits = String(options.xUnits || "").trim();
+  const markerMode = allPoints.length <= 120 ? "all" : "key";
+
+  const xTickLabels = xTicks
+    .map((value) => `
+      <text x="${xFor(value).toFixed(2)}" y="${chart.height - 18}" text-anchor="middle" class="job-output-chart-label">
+        ${escapeHtml(formatChartValue(value, { digits: 4, units: xUnits }))}
+      </text>
+    `)
+    .join("");
+
+  const yTickLabels = yTicks
+    .map((value, index) => {
+      const y = yFor(value);
+      const gridClass = index === yTicks.length - 1 ? "job-output-axis" : "job-output-gridline";
+      return `
+        <line x1="${chart.left}" y1="${y.toFixed(2)}" x2="${chart.left + plotWidth}" y2="${y.toFixed(2)}" class="${gridClass}"></line>
+        <text x="${chart.left - 8}" y="${(y + 3.5).toFixed(2)}" text-anchor="end" class="job-output-chart-label">
+          ${escapeHtml(formatChartValue(value, { digits: 5 }))}
+        </text>
+      `;
+    })
+    .join("");
+
+  const lines = normalizedSeries
+    .map((item) => {
+      const points = item.points.map((point) => `${xFor(point.x).toFixed(2)},${yFor(point.y).toFixed(2)}`).join(" ");
+      const circles = item.points
+        .map((point, index) => {
+          const isKeyPoint = index === 0 || index === item.points.length - 1;
+          const showMarker = markerMode === "all" || isKeyPoint;
+          const cx = xFor(point.x).toFixed(2);
+          const cy = yFor(point.y).toFixed(2);
+          const tooltip = formatChartTooltip(item.name, point, options);
+          return `
+            <g class="job-output-chart-point-wrap">
+              <circle cx="${cx}" cy="${cy}" r="${isKeyPoint ? "3.1" : "2.2"}" class="job-output-chart-point${showMarker ? "" : " job-output-chart-point--hidden"}" fill="${escapeHtml(item.color)}"></circle>
+              <circle cx="${cx}" cy="${cy}" r="7" class="job-output-chart-hit">
+                <title>${escapeHtml(tooltip)}</title>
+              </circle>
+            </g>
+          `;
+        })
+        .join("");
+      return `
+        <polyline points="${points}" fill="none" stroke="${escapeHtml(item.color)}" stroke-width="2.7" stroke-linecap="round" stroke-linejoin="round" class="job-output-chart-line"></polyline>
+        ${circles}
+      `;
+    })
+    .join("");
+
+  const legend = normalizedSeries
+    .map((item) => `
+      <span class="job-output-legend-item">
+        <i style="background:${escapeHtml(item.color)}"></i>${escapeHtml(item.name)}
+      </span>
+    `)
+    .join("");
+
+  return `
+    <div class="job-output-chart-wrap">
+      <svg class="job-output-chart" viewBox="0 0 ${chart.width} ${chart.height}" role="img" aria-label="Output trend chart">
+        <rect x="${chart.left}" y="${chart.top}" width="${plotWidth}" height="${plotHeight}" class="job-output-chart-plot"></rect>
+        ${yTickLabels}
+        <line x1="${chart.left}" y1="${chart.top}" x2="${chart.left}" y2="${chart.top + plotHeight}" class="job-output-axis"></line>
+        ${xTickLabels}
+        ${xLabel ? `<text x="${chart.left + plotWidth / 2}" y="${chart.height - 4}" text-anchor="middle" class="job-output-chart-caption">${escapeHtml(xLabel)}</text>` : ""}
+        ${yLabel ? `<text x="${chart.left}" y="10" class="job-output-chart-caption">${escapeHtml(yUnits ? `${yLabel} (${yUnits})` : yLabel)}</text>` : ""}
+        ${lines}
+      </svg>
+      ${legend ? `<div class="job-output-legend">${legend}</div>` : ""}
+    </div>
+  `;
 }
 
 function stopJobsListener() {
@@ -1739,6 +2822,17 @@ function formatXmlNumber(value) {
   return Number.isFinite(number) ? String(number) : "0";
 }
 
+function normalizeSystemCharge(value, fallback = 0) {
+  const text = String(value ?? "").trim();
+  if (!text) return fallback;
+  const number = Number(text);
+  return Number.isFinite(number) && Number.isInteger(number) ? number : fallback;
+}
+
+function buildDftSettingsXml(systemCharge) {
+  return `<DFTSettings><SystemCharge>${normalizeSystemCharge(systemCharge)}</SystemCharge></DFTSettings>`;
+}
+
 function minifyXmlText(xmlText) {
   return String(xmlText || "")
     .replace(/>\s+</g, "><")
@@ -1771,6 +2865,7 @@ function buildMolecularDynamicsContinuationXmlFromParts(parts, mdConfig) {
   const timeStepFs = Number(mdConfig?.timeStepFs) || DEFAULT_MD_TIME_STEP_FS;
   const trajectoryFile = String(mdConfig?.trajectoryFile || DEFAULT_MD_TRAJECTORY_FILE).trim() || DEFAULT_MD_TRAJECTORY_FILE;
   const initialVelocityXml = String(parts?.initialVelocityXml || "").trim();
+  const dftSettingsXml = buildDftSettingsXml(mdConfig?.systemCharge ?? mdConfig?.system_charge ?? 0);
 
   return minifyXmlText(`<?xml version="1.0"?>
 <PC-Compounds xmlns="http://www.ncbi.nlm.nih.gov">
@@ -1791,6 +2886,7 @@ function buildMolecularDynamicsContinuationXmlFromParts(parts, mdConfig) {
         </PC-Coordinates_conformers>
       </PC-Coordinates>
     </PC-Compound_coords>
+    ${dftSettingsXml}
     <InsightMD>
       <SchemaVersion>1</SchemaVersion>
       <StepCount>${stepCount}</StepCount>
@@ -1953,6 +3049,10 @@ function buildMdContinuationSubmissionXml(resolvedOutput, job, mdContinuationCon
     trajectoryFile:
       String(mdContinuationConfig?.trajectoryFile || "").trim() ||
       getMdTrajectoryFile(job, md),
+    systemCharge: normalizeSystemCharge(
+      mdContinuationConfig?.systemCharge ?? mdContinuationConfig?.system_charge,
+      normalizeSystemCharge(job?.systemCharge ?? job?.system_charge, 0)
+    ),
   };
 
   const finalXml = getMdFinalXml(resolvedOutput?.root);
@@ -2131,10 +3231,15 @@ async function submitMoreMdFrames(job, continuationConfig = {}) {
   const trajectoryFile =
     String(continuationConfig?.mdConfig?.trajectory_file || "").trim() ||
     getMdTrajectoryFile(job, md);
+  const systemCharge = normalizeSystemCharge(
+    job?.systemCharge ?? job?.system_charge,
+    normalizeSystemCharge(rootJob?.systemCharge ?? rootJob?.system_charge, 0)
+  );
   const continuationXml = buildMdContinuationSubmissionXml(resolvedOutput, job, {
     stepCount: extraFrameCount,
     timeStepFs,
     trajectoryFile,
+    systemCharge,
   });
 
   const response = await submitMoleculeCallable({
@@ -2144,6 +3249,8 @@ async function submitMoreMdFrames(job, continuationConfig = {}) {
     mode: "molecular_dynamics",
     hardware_tier: hardwareTier,
     max_runtime_sec: maxRuntimeSec,
+    system_charge: systemCharge,
+    systemCharge,
     md_step_count: extraFrameCount,
     md_time_step_fs: timeStepFs,
     md_total_time_fs: extraFrameCount * timeStepFs,
@@ -2164,6 +3271,8 @@ async function openSimMoreFramesModal(job) {
   }
 
   const inlineMdPayload = getMolecularDynamicsScenePayload(job)?.MolecularDynamics || null;
+  let resolvedOutput = null;
+  let previewMdPayload = inlineMdPayload;
   const continuation = getMdContinuation(job);
   const jobId = String(job?.id ?? job?.jobId ?? "").trim();
   const rootJobId = String(continuation?.rootJobId || jobId).trim() || jobId;
@@ -2175,25 +3284,59 @@ async function openSimMoreFramesModal(job) {
   const displayFileName =
     String(job?.filename || rootJob?.filename || rootJobName || "").trim() ||
     suggestedNickname;
+
+  try {
+    resolvedOutput = await resolveMolecularDynamicsOutput(job);
+    previewMdPayload = resolvedOutput?.scenePayload?.MolecularDynamics || previewMdPayload;
+  } catch (err) {
+    console.warn("Unable to prepare MD continuation preview:", err);
+  }
+
   const atomCount =
     Math.max(
       0,
       Math.trunc(Number(job?.nAtoms ?? job?.n_atoms) || 0)
     ) ||
-    Math.max(0, Math.trunc(Number(inlineMdPayload?.atomCount || inlineMdPayload?.atomicNumbers?.length) || 0));
-  const timeStepFs = getMdTimeStepFs(job, inlineMdPayload || {});
-  const suggestedFrameCount = getSuggestedContinuationFrameCount(job, inlineMdPayload || {});
+    Math.max(0, Math.trunc(Number(previewMdPayload?.atomCount || previewMdPayload?.atomicNumbers?.length) || 0));
+  const timeStepFs = getMdTimeStepFs(job, previewMdPayload || {});
+  const suggestedFrameCount = getSuggestedContinuationFrameCount(job, previewMdPayload || {});
+  const trajectoryFile = getMdTrajectoryFile(job, previewMdPayload || {});
+  const suggestedSystemCharge = normalizeSystemCharge(
+    job?.systemCharge ?? job?.system_charge,
+    normalizeSystemCharge(rootJob?.systemCharge ?? rootJob?.system_charge, 0)
+  );
   const maxRuntimeMinutes = Math.max(
     1,
     Math.ceil(Math.max(60, Number(job?.maxRuntimeSec ?? job?.max_runtime_sec) || 30 * 60) / 60)
   );
+  let continuationPreviewXml = "";
+
+  try {
+    continuationPreviewXml = resolvedOutput
+        ? buildMdContinuationSubmissionXml(resolvedOutput, job, {
+            stepCount: suggestedFrameCount,
+            timeStepFs,
+            trajectoryFile,
+            systemCharge: suggestedSystemCharge,
+          })
+        : previewMdPayload
+          ? buildMdContinuationXmlFromTrajectory(previewMdPayload, {
+              stepCount: suggestedFrameCount,
+              timeStepFs,
+              trajectoryFile,
+              systemCharge: suggestedSystemCharge,
+            })
+        : "";
+  } catch (err) {
+    console.warn("Unable to build MD continuation preview XML:", err);
+  }
 
   setOpen(false);
   window.openSubmitModal({
     fileName: String(job?.filename || "").trim() || displayFileName,
     displayFileName,
     nAtoms: atomCount,
-    moleculeXml: "",
+    moleculeXml: continuationPreviewXml,
     mdInitialVelocityXml: "",
     selectedMode: "molecular_dynamics",
     lockedMode: "molecular_dynamics",
@@ -2210,8 +3353,10 @@ async function openSimMoreFramesModal(job) {
     initialMaxRuntimeMinutes: maxRuntimeMinutes,
     initialMdStepCount: suggestedFrameCount,
     initialMdTimeStepFs: timeStepFs,
+    initialSystemCharge: suggestedSystemCharge,
     initialFocusInput: "mdStepCount",
-    disabledInputs: ["mdTimeStepFs"],
+    disabledInputs: ["mdTimeStepFs", "systemCharge"],
+    inputBuilderReadOnly: true,
     onSubmit: async ({ nickname, hardware_tier, max_runtime_sec, mdConfig }) => {
       return submitMoreMdFrames(job, {
         nickname,

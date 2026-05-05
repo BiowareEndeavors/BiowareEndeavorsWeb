@@ -163,6 +163,70 @@ function formatXmlNumber(value) {
   return Number.isFinite(number) ? String(number) : "0";
 }
 
+function normalizeSystemCharge(value) {
+  const text = String(value ?? "").trim();
+  if (!text) return 0;
+
+  const number = Number(text);
+  if (!Number.isFinite(number) || !Number.isInteger(number)) {
+    throw new Error("Total system charge must be a whole number.");
+  }
+
+  return number;
+}
+
+function readSystemChargeFromXmlRoot(root) {
+  const settingsEl = findFirstByLocalName(root, "DFTSettings");
+  const chargeEl = settingsEl
+    ? childrenByLocalName(settingsEl, "SystemCharge")[0]
+    : findFirstByLocalName(root, "SystemCharge");
+
+  try {
+    return normalizeSystemCharge(chargeEl?.textContent);
+  } catch (_) {
+    return 0;
+  }
+}
+
+function buildDftSettingsXml(systemCharge) {
+  return `<DFTSettings><SystemCharge>${normalizeSystemCharge(systemCharge)}</SystemCharge></DFTSettings>`;
+}
+
+function upsertSystemChargeXml(moleculeXml, systemCharge) {
+  const xmlText = String(moleculeXml || "").trim();
+  if (!xmlText) return xmlText;
+
+  const chargeBlock = `<SystemCharge>${normalizeSystemCharge(systemCharge)}</SystemCharge>`;
+  const chargeTagRe = /<(?:[A-Za-z_][\w.-]*:)?SystemCharge\b[^>]*>[\s\S]*?<\/(?:[A-Za-z_][\w.-]*:)?SystemCharge>/;
+  if (chargeTagRe.test(xmlText)) {
+    return minifyXml(xmlText.replace(chargeTagRe, chargeBlock));
+  }
+
+  const dftCloseRe = /<\/(?:[A-Za-z_][\w.-]*:)?DFTSettings\s*>/;
+  const dftCloseMatch = xmlText.match(dftCloseRe);
+  if (dftCloseMatch?.index !== undefined) {
+    const insertAt = dftCloseMatch.index;
+    return minifyXml(`${xmlText.slice(0, insertAt)}${chargeBlock}${xmlText.slice(insertAt)}`);
+  }
+
+  const settingsBlock = buildDftSettingsXml(systemCharge);
+  const compoundCloseRe = /<\/(?:[A-Za-z_][\w.-]*:)?PC-Compound\s*>/;
+  const compoundCloseMatch = xmlText.match(compoundCloseRe);
+  if (compoundCloseMatch?.index !== undefined) {
+    const insertAt = compoundCloseMatch.index;
+    return minifyXml(`${xmlText.slice(0, insertAt)}${settingsBlock}${xmlText.slice(insertAt)}`);
+  }
+
+  const compoundsCloseRe = /<\/(?:[A-Za-z_][\w.-]*:)?PC-Compounds\s*>/;
+  const compoundsCloseMatch = xmlText.match(compoundsCloseRe);
+  if (compoundsCloseMatch?.index !== undefined) {
+    const insertAt = compoundsCloseMatch.index;
+    return minifyXml(`${xmlText.slice(0, insertAt)}${settingsBlock}${xmlText.slice(insertAt)}`);
+  }
+
+  return minifyXml(`${settingsBlock}${xmlText}`);
+}
+
 function extractMdInitialVelocityXml(root, atomCount) {
   const velocityUnitsEl = findFirstByLocalName(root, "VelocityUnits");
   const velocityXEl = findFirstByLocalName(root, "VelocityX");
@@ -225,6 +289,7 @@ function buildMolecularDynamicsXml(moleculeXml, mdConfig) {
   const timeStepFs = Number(mdConfig?.time_step_fs) || 0.25;
   const trajectoryFile = mdConfig?.trajectory_file || "md_trajectory.json";
   const initialVelocityXml = String(mdConfig?.initial_velocity_xml || "").trim();
+  const dftSettingsXml = buildDftSettingsXml(mdConfig?.system_charge ?? mdConfig?.systemCharge ?? 0);
 
   return minifyXml(`<?xml version="1.0"?>
 <PC-Compounds xmlns="http://www.ncbi.nlm.nih.gov">
@@ -245,6 +310,7 @@ function buildMolecularDynamicsXml(moleculeXml, mdConfig) {
         </PC-Coordinates_conformers>
       </PC-Coordinates>
     </PC-Compound_coords>
+    ${dftSettingsXml}
     <InsightMD>
       <SchemaVersion>1</SchemaVersion>
       <StepCount>${stepCount}</StepCount>
@@ -288,10 +354,12 @@ function extractMoleculeXml(xmlText) {
   }
 
   const mdInitialVelocityXml = extractMdInitialVelocityXml(doc, n);
+  const systemCharge = readSystemChargeFromXmlRoot(doc);
 
   return {
     nAtoms: n,
     mdInitialVelocityXml,
+    systemCharge,
     moleculeXml: wrapMoleculeXml(
       found["PC-Atoms_element"].el,
       found["PC-Conformer_x"].el,
@@ -576,7 +644,7 @@ async function handleFile(file) {
   }
 
   setStatus(
-    `Validated (${extracted.nAtoms} atoms${extracted.mdInitialVelocityXml ? ", with initial MD velocities" : ""}). Configure job...`
+    `Validated (${extracted.nAtoms} atoms${extracted.mdInitialVelocityXml ? ", with initial MD velocities" : ""}). Opening input builder...`
   );
 
   if (typeof window.openSubmitModal !== "function") {
@@ -589,16 +657,19 @@ async function handleFile(file) {
     nAtoms: extracted.nAtoms,
     mdInitialVelocityXml: extracted.mdInitialVelocityXml,
     moleculeXml: extracted.moleculeXml,
-    onSubmit: async ({ mode, nickname, hardware_tier, max_runtime_sec, moleculeXml, fileName, mdConfig }) => {
+    initialSystemCharge: extracted.systemCharge,
+    onSubmit: async ({ mode, nickname, hardware_tier, max_runtime_sec, systemCharge, moleculeXml, fileName, mdConfig }) => {
       setStatus("Submitting...");
       const submissionXml = mode === "molecular_dynamics"
-        ? buildMolecularDynamicsXml(moleculeXml, mdConfig)
-        : moleculeXml;
+        ? buildMolecularDynamicsXml(moleculeXml, { ...mdConfig, system_charge: systemCharge })
+        : upsertSystemChargeXml(moleculeXml, systemCharge);
       const data = await submitMolecule(submissionXml, fileName, {
         mode,
         nickname,
         hardware_tier,
         max_runtime_sec,
+        system_charge: systemCharge,
+        systemCharge,
         ...(mdConfig
           ? {
               md_step_count: mdConfig.step_count,
@@ -616,43 +687,145 @@ async function handleFile(file) {
   });
 }
 
-
-function _molHelpSetOpen(isOpen){
-  const ov = document.getElementById("molHelpOverlay");
-  if (!ov) return;
-  ov.classList.toggle("molhelp-overlay--open", isOpen);
-  ov.setAttribute("aria-hidden", isOpen ? "false" : "true");
-
-  if (isOpen){
-    // focus close for keyboard users
-    const closeBtn = document.getElementById("molHelpCloseBtn");
-    if (closeBtn) closeBtn.focus();
+function openBlankJobBuilder() {
+  if (typeof window.openSubmitModal !== "function") {
+    setStatus("UI error: input builder not loaded yet.");
+    return;
   }
+
+  setStatus("Opening blank input builder...");
+
+  window.openSubmitModal({
+    fileName: "blank-input.xml",
+    displayFileName: "Blank input",
+    nAtoms: 0,
+    moleculeXml: "",
+    mdInitialVelocityXml: "",
+    startBlank: true,
+    initialNickname: "blank-input",
+    initialSystemCharge: 0,
+    onSubmit: async ({ mode, nickname, hardware_tier, max_runtime_sec, systemCharge, moleculeXml, fileName, mdConfig }) => {
+      setStatus("Submitting...");
+      const submissionXml = mode === "molecular_dynamics"
+        ? buildMolecularDynamicsXml(moleculeXml, { ...mdConfig, system_charge: systemCharge })
+        : upsertSystemChargeXml(moleculeXml, systemCharge);
+      const data = await submitMolecule(submissionXml, fileName, {
+        mode,
+        nickname,
+        hardware_tier,
+        max_runtime_sec,
+        system_charge: systemCharge,
+        systemCharge,
+        ...(mdConfig
+          ? {
+              md_step_count: mdConfig.step_count,
+              md_time_step_fs: mdConfig.time_step_fs,
+              md_total_time_fs: mdConfig.total_time_fs,
+              md_trajectory_file: mdConfig.trajectory_file,
+            }
+          : {}),
+      });
+      console.log("submit_molecule response:", data);
+      console.log("submit_molecule selected endpoint:", data?.runpod_endpoint);
+      window.lastMoleculeSubmitResponse = data;
+      setStatus("Submitted successfully.");
+    },
+  });
 }
 
-function _molHelpInit(){
-  const openBtn  = document.getElementById("molHelpBtn");
-  const closeBtn = document.getElementById("molHelpCloseBtn");
-  const okBtn    = document.getElementById("molHelpOkBtn");
-  const overlay  = document.getElementById("molHelpOverlay");
+document.getElementById("startBlankJobBtn")?.addEventListener("click", openBlankJobBuilder);
+window.openBlankJobBuilder = openBlankJobBuilder;
 
-  if (!openBtn || !overlay) return;
+const TEMPLATE_INPUT_XML = `<?xml version="1.0" encoding="UTF-8"?>
+<PC-Compounds xmlns="http://www.ncbi.nlm.nih.gov">
+  <PC-Compound>
+    <PC-Compound_atoms>
+      <PC-Atoms>
+        <PC-Atoms_element>
+          <PC-Element>8</PC-Element>
+          <PC-Element>1</PC-Element>
+          <PC-Element>1</PC-Element>
+        </PC-Atoms_element>
+      </PC-Atoms>
+    </PC-Compound_atoms>
 
-  openBtn.addEventListener("click", () => _molHelpSetOpen(true));
-  if (closeBtn) closeBtn.addEventListener("click", () => _molHelpSetOpen(false));
-  if (okBtn) okBtn.addEventListener("click", () => _molHelpSetOpen(false));
+    <PC-Compound_coords>
+      <PC-Coordinates>
+        <PC-Coordinates_conformers>
+          <PC-Conformer>
+            <PC-Conformer_x>
+              <PC-Conformer_x_E>0.000000</PC-Conformer_x_E>
+              <PC-Conformer_x_E>0.957200</PC-Conformer_x_E>
+              <PC-Conformer_x_E>-0.239987</PC-Conformer_x_E>
+            </PC-Conformer_x>
+            <PC-Conformer_y>
+              <PC-Conformer_y_E>0.000000</PC-Conformer_y_E>
+              <PC-Conformer_y_E>0.000000</PC-Conformer_y_E>
+              <PC-Conformer_y_E>0.927297</PC-Conformer_y_E>
+            </PC-Conformer_y>
+            <PC-Conformer_z>
+              <PC-Conformer_z_E>0.000000</PC-Conformer_z_E>
+              <PC-Conformer_z_E>0.000000</PC-Conformer_z_E>
+              <PC-Conformer_z_E>0.000000</PC-Conformer_z_E>
+            </PC-Conformer_z>
+          </PC-Conformer>
+        </PC-Coordinates_conformers>
+      </PC-Coordinates>
+    </PC-Compound_coords>
 
-  // click outside modal closes
-  overlay.addEventListener("click", (e) => {
-    if (e.target === overlay) _molHelpSetOpen(false);
-  });
+    <DFTSettings>
+      <SystemCharge>0</SystemCharge>
+    </DFTSettings>
 
-  // escape closes
-  window.addEventListener("keydown", (e) => {
-    if (e.key === "Escape" && overlay.classList.contains("molhelp-overlay--open")){
-      _molHelpSetOpen(false);
-    }
-  });
+    <InsightMD>
+      <SchemaVersion>1</SchemaVersion>
+      <StepCount>25</StepCount>
+      <TimeStepFs>0.25</TimeStepFs>
+      <TrajectoryFile>md_trajectory.json</TrajectoryFile>
+
+      <!-- Optional for MD: initial velocities. Leave this block commented out to start with zero initial velocities. -->
+      <!--
+      <VelocityUnits>angstrom_per_fs</VelocityUnits>
+      <VelocityX>
+        <VelocityX_E>0.000000</VelocityX_E>
+        <VelocityX_E>0.000000</VelocityX_E>
+        <VelocityX_E>0.000000</VelocityX_E>
+      </VelocityX>
+      <VelocityY>
+        <VelocityY_E>0.000000</VelocityY_E>
+        <VelocityY_E>0.000000</VelocityY_E>
+        <VelocityY_E>0.000000</VelocityY_E>
+      </VelocityY>
+      <VelocityZ>
+        <VelocityZ_E>0.000000</VelocityZ_E>
+        <VelocityZ_E>0.000000</VelocityZ_E>
+        <VelocityZ_E>0.000000</VelocityZ_E>
+      </VelocityZ>
+      -->
+    </InsightMD>
+  </PC-Compound>
+</PC-Compounds>
+`;
+
+function downloadTextFile(filename, text, mimeType = "text/plain;charset=utf-8") {
+  const blob = new Blob([text], { type: mimeType });
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = filename;
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+  URL.revokeObjectURL(url);
 }
 
-window.addEventListener("load", _molHelpInit);
+function downloadTemplateInputXml() {
+  downloadTextFile(
+    "insight-template-input.xml",
+    TEMPLATE_INPUT_XML,
+    "application/xml;charset=utf-8"
+  );
+  setStatus("Template input XML downloaded.");
+}
+
+document.getElementById("downloadTemplateXmlBtn")?.addEventListener("click", downloadTemplateInputXml);

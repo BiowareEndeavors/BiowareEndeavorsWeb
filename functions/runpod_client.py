@@ -213,6 +213,7 @@ def create_job_doc(
     hardware_tier: str,
     max_runtime_sec: int,
     runpod_endpoint: str,
+    system_charge: int = 0,
     input_xml_ref: Dict[str, Any] | None = None,
     input_xml_upload_error: str = "",
     md_config: Dict[str, Any] | None = None,
@@ -234,6 +235,7 @@ def create_job_doc(
             "jobType": job_type,
             "hardwareTier": hardware_tier,
             "maxRuntimeSec": max_runtime_sec,
+            "systemCharge": int(system_charge),
             "runpodEndpoint": runpod_endpoint,
             **({"inputXmlRef": input_xml_ref} if input_xml_ref else {}),
             **({"inputXmlUploadError": input_xml_upload_error} if input_xml_upload_error else {}),
@@ -255,6 +257,7 @@ def submit_job(
     mode: str,
     hardware_tier: str,
     max_runtime_sec: int,
+    system_charge: int = 0,
     runpod_endpoint: str | None = None,
     md_config: Dict[str, Any] | None = None,
 ) -> Dict[str, Any]:
@@ -287,6 +290,8 @@ def submit_job(
             "job_type": job_type,
             "hardware_tier": hardware_tier,
             "max_runtime_sec": max_runtime_sec,
+            "system_charge": int(system_charge),
+            "systemCharge": int(system_charge),
             **({"md_config": md_config, "molecularDynamics": md_config} if md_config else {}),
         }
     }

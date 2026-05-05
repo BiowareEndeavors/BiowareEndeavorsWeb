@@ -9,6 +9,8 @@
   var moleculeShader = null;
   var moleculeAtomMesh = null;
   var moleculeBondMesh = null;
+  var moleculeForceShaftMesh = null;
+  var moleculeForceHeadMesh = null;
 
   var moleculeState = {
     scene: null,
@@ -31,10 +33,16 @@
   var DEFAULT_FIT_DISTANCE_MULTIPLIER = 1.45;
   var DEFAULT_FIT_MIN_ORBIT_RADIUS = 0.9;
   var DEFAULT_FIT_ORBIT_RADIUS_MULTIPLIER = 0.85;
+  var FORCE_ARROW_COLOR = [0.0, 0.9, 0.75];
+  var FORCE_ARROW_MAX_LENGTH_RATIO = 0.38;
+  var FORCE_ARROW_SHAFT_RADIUS_RATIO = 0.012;
+  var FORCE_ARROW_HEAD_RADIUS_RATIO = 0.038;
+  var FORCE_ARROW_HEAD_LENGTH_RATIO = 0.095;
   var volumeCamera = null;
   var moleculeCamera = null;
 
   uiState.playback_fps = 12;
+  uiState.show_forces = false;
 
   var vertShaderMesh =
     "#version 300 es\n" +
@@ -246,23 +254,104 @@
     return null;
   }
 
-  function normalizeFrames(input, atomCount) {
+  function flattenAtomVectors(atoms, fieldNames) {
+    if (!Array.isArray(atoms)) return null;
+    var data = new Float32Array(atoms.length * 3);
+
+    for (var i = 0; i < atoms.length; ++i) {
+      var atom = atoms[i] || {};
+      var vector = null;
+      for (var keyIndex = 0; keyIndex < fieldNames.length; ++keyIndex) {
+        var key = fieldNames[keyIndex];
+        if (atom[key]) {
+          vector = atom[key];
+          break;
+        }
+      }
+
+      if (!vector || vector.length < 3) return null;
+
+      data[i * 3 + 0] = Number(vector[0]) || 0;
+      data[i * 3 + 1] = Number(vector[1]) || 0;
+      data[i * 3 + 2] = Number(vector[2]) || 0;
+    }
+
+    return data;
+  }
+
+  function negateVectorFrame(frame) {
+    if (!frame) return null;
+    var out = new Float32Array(frame.length);
+    for (var i = 0; i < frame.length; ++i) {
+      out[i] = -frame[i];
+    }
+    return out;
+  }
+
+  function normalizeVectorFrame(frame, atomCount, fieldNames) {
+    if (!frame && frame !== 0) return null;
+
+    if (ArrayBuffer.isView(frame) || Array.isArray(frame)) {
+      var flat = toFiniteArray(frame);
+      if (flat.length === atomCount * 3) {
+        return new Float32Array(
+          flat.map(function (value) {
+            return Number(value) || 0;
+          })
+        );
+      }
+    }
+
+    for (var keyIndex = 0; keyIndex < fieldNames.length; ++keyIndex) {
+      var key = fieldNames[keyIndex];
+      if (frame[key]) return normalizeVectorFrame(frame[key], atomCount, fieldNames);
+    }
+
+    if (frame.atoms) return flattenAtomVectors(frame.atoms, fieldNames);
+
+    return null;
+  }
+
+  function normalizeForceFrame(frame, atomCount) {
+    var forces = normalizeVectorFrame(frame, atomCount, ["forces", "force", "f"]);
+    if (forces) return forces;
+
+    var gradients = normalizeVectorFrame(frame, atomCount, ["gradients", "gradient", "g"]);
+    return gradients ? negateVectorFrame(gradients) : null;
+  }
+
+  function normalizeTrajectory(input, atomCount) {
     var frames = input.frames || input.trajectory || input.snapshots;
     var normalized = [];
+    var forceFrames = [];
+    var hasForceFrames = false;
 
     if (Array.isArray(frames) && frames.length) {
       for (var i = 0; i < frames.length; ++i) {
         var frame = normalizeFrame(frames[i], atomCount);
-        if (frame) normalized.push(frame);
+        if (frame) {
+          var forceFrame = normalizeForceFrame(frames[i], atomCount);
+          normalized.push(frame);
+          forceFrames.push(forceFrame);
+          hasForceFrames = hasForceFrames || !!forceFrame;
+        }
       }
     }
 
     if (!normalized.length) {
       var single = normalizeFrame(input.positions || input.coordinates || input.xyz || input.atoms, atomCount);
-      if (single) normalized.push(single);
+      if (single) {
+        var singleForceFrame = normalizeForceFrame(input, atomCount);
+        normalized.push(single);
+        forceFrames.push(singleForceFrame);
+        hasForceFrames = hasForceFrames || !!singleForceFrame;
+      }
     }
 
-    return normalized;
+    return {
+      frames: normalized,
+      forceFrames: hasForceFrames ? forceFrames : [],
+    };
   }
 
   function getScenePositionScale(input) {
@@ -701,6 +790,26 @@
     };
   }
 
+  function computeMaxVectorMagnitude(frames) {
+    var maxMagnitude = 0;
+    if (!Array.isArray(frames)) return maxMagnitude;
+
+    for (var frameIndex = 0; frameIndex < frames.length; ++frameIndex) {
+      var frame = frames[frameIndex];
+      if (!frame) continue;
+
+      for (var i = 0; i < frame.length; i += 3) {
+        var x = frame[i + 0];
+        var y = frame[i + 1];
+        var z = frame[i + 2];
+        var magnitude = Math.sqrt(x * x + y * y + z * z);
+        if (magnitude > maxMagnitude) maxMagnitude = magnitude;
+      }
+    }
+
+    return maxMagnitude;
+  }
+
   function normalizeMoleculeScene(input) {
     var root = input && typeof input === "object" ? input : null;
     var scene = root;
@@ -724,7 +833,9 @@
     var atomicNumbers = normalizeAtomicNumbers(scene);
     if (!atomicNumbers.length) return null;
 
-    var frames = normalizeFrames(scene, atomicNumbers.length);
+    var trajectory = normalizeTrajectory(scene, atomicNumbers.length);
+    var frames = trajectory.frames;
+    var forceFrames = trajectory.forceFrames;
     if (!frames.length) return null;
 
     var positionScale = getScenePositionScale(scene);
@@ -761,11 +872,18 @@
     }
 
     var radius = Math.max(1.0, 0.5 * Math.sqrt(dx * dx + dy * dy + dz * dz) + maxRadius * 1.8);
+    var maxForceMagnitude = computeMaxVectorMagnitude(forceFrames);
+    var forceScale = maxForceMagnitude > 0
+      ? (radius * FORCE_ARROW_MAX_LENGTH_RATIO) / maxForceMagnitude
+      : 0;
 
     return {
       label: scene.label || scene.name || scene.detail || "",
       atomicNumbers: atomicNumbers,
       frames: frames,
+      forceFrames: forceFrames,
+      forceScale: forceScale,
+      forceUnits: scene.forceUnits || scene.force_units || scene.gradientUnits || scene.gradient_units || "",
       atomColors: atomColors,
       atomRadii: atomRadii,
       bonds: bonds,
@@ -850,6 +968,38 @@
     };
   }
 
+  function createConeGeometry(radialSegments) {
+    var positions = [0, 0.5, 0];
+    var normals = [0, 1, 0];
+    var indices = [];
+
+    for (var segment = 0; segment <= radialSegments; ++segment) {
+      var t = (segment / radialSegments) * Math.PI * 2.0;
+      var x = Math.cos(t);
+      var z = Math.sin(t);
+
+      positions.push(x, -0.5, z);
+      normals.push(x, 0.35, z);
+    }
+
+    var baseCenterIndex = positions.length / 3;
+    positions.push(0, -0.5, 0);
+    normals.push(0, -1, 0);
+
+    for (var index = 0; index < radialSegments; ++index) {
+      var baseA = 1 + index;
+      var baseB = 1 + index + 1;
+      indices.push(0, baseA, baseB);
+      indices.push(baseCenterIndex, baseB, baseA);
+    }
+
+    return {
+      positions: new Float32Array(positions),
+      normals: new Float32Array(normals),
+      indices: new Uint16Array(indices),
+    };
+  }
+
   function createInstancedMesh(geometry) {
     var mesh = {
       vao: gl.createVertexArray(),
@@ -901,6 +1051,8 @@
     moleculeShader = new Shader(gl, vertShaderMesh, fragShaderMesh);
     moleculeAtomMesh = createInstancedMesh(createSphereGeometry(14, 18));
     moleculeBondMesh = createInstancedMesh(createCylinderGeometry(18));
+    moleculeForceShaftMesh = createInstancedMesh(createCylinderGeometry(10));
+    moleculeForceHeadMesh = createInstancedMesh(createConeGeometry(14));
   }
 
   function uploadInstanceData(mesh, modelData, colorData, instanceCount) {
@@ -911,6 +1063,11 @@
     gl.bufferData(gl.ARRAY_BUFFER, colorData, gl.DYNAMIC_DRAW);
 
     mesh.instanceCount = instanceCount;
+  }
+
+  function clearInstanceData(mesh) {
+    if (!mesh) return;
+    uploadInstanceData(mesh, new Float32Array(16), new Float32Array(3), 0);
   }
 
   function writeSphereMatrix(out, offset, x, y, z, scale) {
@@ -989,6 +1146,141 @@
     out[offset + 15] = 1;
 
     return true;
+  }
+
+  function hasMoleculeForceData() {
+    return !!(
+      moleculeState.scene &&
+      Array.isArray(moleculeState.scene.forceFrames) &&
+      moleculeState.scene.forceFrames.length &&
+      moleculeState.scene.forceFrames.some(function (frame) {
+        return !!frame;
+      })
+    );
+  }
+
+  function rebuildMoleculeForceInstanceData(scene, frame, atomRenderRadii) {
+    if (!moleculeForceShaftMesh || !moleculeForceHeadMesh) return;
+
+    if (!uiState.show_forces || !scene || !frame || !hasMoleculeForceData()) {
+      clearInstanceData(moleculeForceShaftMesh);
+      clearInstanceData(moleculeForceHeadMesh);
+      return;
+    }
+
+    var forceFrame = scene.forceFrames[moleculeState.frameIndex] || null;
+    var atomCount = scene.atomicNumbers.length;
+    var forceScale = Number(scene.forceScale) || 0;
+    if (!forceFrame || !(forceScale > 0)) {
+      clearInstanceData(moleculeForceShaftMesh);
+      clearInstanceData(moleculeForceHeadMesh);
+      return;
+    }
+
+    var shaftModels = new Float32Array(atomCount * 16);
+    var shaftColors = new Float32Array(atomCount * 3);
+    var headModels = new Float32Array(atomCount * 16);
+    var headColors = new Float32Array(atomCount * 3);
+    var shaftCount = 0;
+    var headCount = 0;
+    var shaftRadius = Math.max(0.012, Math.min(0.055, scene.radius * FORCE_ARROW_SHAFT_RADIUS_RATIO));
+    var headRadius = Math.max(shaftRadius * 2.2, Math.min(0.16, scene.radius * FORCE_ARROW_HEAD_RADIUS_RATIO));
+    var maxHeadLength = Math.max(shaftRadius * 4.0, scene.radius * FORCE_ARROW_HEAD_LENGTH_RATIO);
+
+    for (var atomIndex = 0; atomIndex < atomCount; ++atomIndex) {
+      var fx = forceFrame[atomIndex * 3 + 0];
+      var fy = forceFrame[atomIndex * 3 + 1];
+      var fz = forceFrame[atomIndex * 3 + 2];
+      var magnitude = Math.sqrt(fx * fx + fy * fy + fz * fz);
+      if (!(magnitude > 1e-10)) continue;
+
+      var dirX = fx / magnitude;
+      var dirY = fy / magnitude;
+      var dirZ = fz / magnitude;
+      var arrowLength = magnitude * forceScale;
+      if (!(arrowLength > shaftRadius * 3.0)) continue;
+
+      var px = frame[atomIndex * 3 + 0];
+      var py = frame[atomIndex * 3 + 1];
+      var pz = frame[atomIndex * 3 + 2];
+      var atomRadius = atomRenderRadii[atomIndex] || 0;
+      var originX = px + dirX * atomRadius * 1.05;
+      var originY = py + dirY * atomRadius * 1.05;
+      var originZ = pz + dirZ * atomRadius * 1.05;
+      var tipX = originX + dirX * arrowLength;
+      var tipY = originY + dirY * arrowLength;
+      var tipZ = originZ + dirZ * arrowLength;
+      var headLength = Math.min(maxHeadLength, arrowLength * 0.42);
+      var shaftLength = Math.max(0, arrowLength - headLength);
+
+      if (shaftLength > shaftRadius * 2.0) {
+        var shaftEndX = tipX - dirX * headLength;
+        var shaftEndY = tipY - dirY * headLength;
+        var shaftEndZ = tipZ - dirZ * headLength;
+        if (
+          writeCylinderMatrix(
+            shaftModels,
+            shaftCount * 16,
+            originX,
+            originY,
+            originZ,
+            shaftEndX,
+            shaftEndY,
+            shaftEndZ,
+            shaftRadius
+          )
+        ) {
+          shaftColors[shaftCount * 3 + 0] = FORCE_ARROW_COLOR[0];
+          shaftColors[shaftCount * 3 + 1] = FORCE_ARROW_COLOR[1];
+          shaftColors[shaftCount * 3 + 2] = FORCE_ARROW_COLOR[2];
+          shaftCount += 1;
+        }
+      }
+
+      var headBaseX = tipX - dirX * headLength;
+      var headBaseY = tipY - dirY * headLength;
+      var headBaseZ = tipZ - dirZ * headLength;
+      if (
+        writeCylinderMatrix(
+          headModels,
+          headCount * 16,
+          headBaseX,
+          headBaseY,
+          headBaseZ,
+          tipX,
+          tipY,
+          tipZ,
+          headRadius
+        )
+      ) {
+        headColors[headCount * 3 + 0] = FORCE_ARROW_COLOR[0];
+        headColors[headCount * 3 + 1] = FORCE_ARROW_COLOR[1];
+        headColors[headCount * 3 + 2] = FORCE_ARROW_COLOR[2];
+        headCount += 1;
+      }
+    }
+
+    if (shaftCount) {
+      uploadInstanceData(
+        moleculeForceShaftMesh,
+        shaftModels.subarray(0, shaftCount * 16),
+        shaftColors.subarray(0, shaftCount * 3),
+        shaftCount
+      );
+    } else {
+      clearInstanceData(moleculeForceShaftMesh);
+    }
+
+    if (headCount) {
+      uploadInstanceData(
+        moleculeForceHeadMesh,
+        headModels.subarray(0, headCount * 16),
+        headColors.subarray(0, headCount * 3),
+        headCount
+      );
+    } else {
+      clearInstanceData(moleculeForceHeadMesh);
+    }
   }
 
   function rebuildMoleculeInstanceData() {
@@ -1087,16 +1379,17 @@
     }
 
     if (!actualBondCount) {
-      uploadInstanceData(moleculeBondMesh, new Float32Array(16), new Float32Array(3), 0);
-      return;
+      clearInstanceData(moleculeBondMesh);
+    } else {
+      uploadInstanceData(
+        moleculeBondMesh,
+        bondModels.subarray(0, actualBondCount * 16),
+        bondColors.subarray(0, actualBondCount * 3),
+        actualBondCount
+      );
     }
 
-    uploadInstanceData(
-      moleculeBondMesh,
-      bondModels.subarray(0, actualBondCount * 16),
-      bondColors.subarray(0, actualBondCount * 3),
-      actualBondCount
-    );
+    rebuildMoleculeForceInstanceData(scene, frame, atomRenderRadii);
   }
 
   function getMoleculeFrameCount() {
@@ -1117,6 +1410,31 @@
       : hasScene
         ? ""
         : "Loads the active job molecule if available.";
+  }
+
+  function syncForceUi(selection) {
+    var group = document.getElementById("vizForceOptions");
+    var toggle = document.getElementById("vizShowForces");
+    if (!toggle && !group) return;
+
+    var hasForces = hasMoleculeForceData();
+    var canShowForces = hasForces && selectionShowsBallstick(selection);
+    if (!hasForces) {
+      uiState.show_forces = false;
+    }
+
+    if (group) {
+      group.hidden = !canShowForces;
+    }
+
+    if (!toggle) return;
+    toggle.checked = !!uiState.show_forces && canShowForces;
+    toggle.disabled = !canShowForces;
+    toggle.title = canShowForces
+      ? "Show force vectors for the current MD frame."
+      : hasForces
+        ? "Enable Ball & Stick to show force vectors."
+        : "No per-frame force vectors are available for this molecule.";
   }
 
   function syncPlaybackUi() {
@@ -1266,6 +1584,7 @@
     if (groupIso) groupIso.style.display = !ballstickOnly && selection === "iso" ? "" : "none";
 
     syncBallstickAvailability();
+    syncForceUi(selection);
     syncPlaybackUi();
     syncAtomLegendUi();
   }
@@ -1495,6 +1814,28 @@
       );
     }
 
+    if (moleculeForceShaftMesh && moleculeForceShaftMesh.instanceCount > 0) {
+      gl.bindVertexArray(moleculeForceShaftMesh.vao);
+      gl.drawElementsInstanced(
+        gl.TRIANGLES,
+        moleculeForceShaftMesh.indexCount,
+        gl.UNSIGNED_SHORT,
+        0,
+        moleculeForceShaftMesh.instanceCount
+      );
+    }
+
+    if (moleculeForceHeadMesh && moleculeForceHeadMesh.instanceCount > 0) {
+      gl.bindVertexArray(moleculeForceHeadMesh.vao);
+      gl.drawElementsInstanced(
+        gl.TRIANGLES,
+        moleculeForceHeadMesh.indexCount,
+        gl.UNSIGNED_SHORT,
+        0,
+        moleculeForceHeadMesh.instanceCount
+      );
+    }
+
     gl.bindVertexArray(null);
   }
 
@@ -1648,6 +1989,7 @@
     var isoRadio = document.getElementById("vizModeIso");
     var volRadio = document.getElementById("vizModeVolume");
     var ballRadio = document.getElementById("vizModeBallstick");
+    var forceToggle = document.getElementById("vizShowForces");
 
     if (isoRadio) {
       isoRadio.addEventListener("change", function () {
@@ -1676,6 +2018,14 @@
     if (ballRadio) {
       ballRadio.addEventListener("change", function () {
         applyCompositeSelection();
+      });
+    }
+
+    if (forceToggle) {
+      forceToggle.addEventListener("change", function () {
+        uiState.show_forces = !!forceToggle.checked;
+        rebuildMoleculeInstanceData();
+        syncModeUi();
       });
     }
 

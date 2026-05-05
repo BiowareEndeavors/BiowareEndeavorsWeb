@@ -8,7 +8,6 @@
   <link rel="stylesheet" href="css/all.css">
   <link rel="stylesheet" href="css/auth.css">
   <link rel="stylesheet" href="css/topbar.css">
-  <link rel="stylesheet" href="css/demo-banner.css">
 </head>
 
 <body>
@@ -29,135 +28,231 @@
         Insight runs custom electronic-structure software on cloud GPU nodes so you can move from setup to results without local HPC infrastructure.
       </p>
 
-      <!-- Optional image area (drop in later) -->
-      <div class="hero-media">
-        <img src="assets/preview.png" alt="Density visualization preview">
+      <div class="hero-media video-media">
+        <iframe
+          src="https://youtu.be/Rx6ATqkII_k"
+          title="Insight demo video"
+          allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+          referrerpolicy="strict-origin-when-cross-origin"
+          allowfullscreen>
+        </iframe>
       </div>
 
       <div class="grid-2">
-        <div class="info-card">
-          <div class="info-title">Energy comparison</div>
-          <div class="info-sub">Total energy comparison against Psi4 using the r2SCAN functional and def2-SVP basis set.</div>
+        <div class="info-card benchmark-card">
+          <div class="benchmark-card__top">
+            <div>
+              <div class="info-title">Benchmarks</div>
+              <div class="info-sub">Energy and force benchmark against Psi4 using the r2SCAN functional and def2-SVP basis set.</div>
+            </div>
+            <div class="benchmark-summary" aria-label="Benchmark summary">
+              <div class="benchmark-stat">
+                <strong>10.0 X</strong>
+                <span>Average speedup</span>
+              </div>
+              <div class="benchmark-stat">
+                <strong>14.1 X</strong>
+                <span>Peak speedup</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="benchmark-notes" aria-label="Benchmark configuration">
+            <span>Includes forces</span>
+            <span>r2SCAN / def2-SVP</span>
+            <span>Psi4: AMD Ryzen 9 9950X3D 16-Core Processor</span>
+            <span>Insight: 5090 GPU</span>
+          </div>
 
           <div class="energy-table-wrap" aria-label="Psi4 and Insight total energy comparison">
             <table class="energy-table">
               <thead>
                 <tr>
                   <th scope="col">Molecule</th>
-                  <th scope="col">Psi4</th>
-                  <th scope="col">Insight</th>
-                  <th scope="col">Error</th>
+                  <th scope="col">Atoms</th>
+                  <th scope="col">Insight E</th>
+                  <th scope="col">Psi4 E</th>
+                  <th scope="col">% Diff</th>
+                  <th scope="col">Insight s</th>
+                  <th scope="col">Psi4 s</th>
+                  <th scope="col">Speedup</th>
                 </tr>
               </thead>
               <tbody>
                 <tr>
                   <th scope="row">CO2</th>
-                  <td>-188.348064463936</td>
-                  <td>-188.347975628799</td>
-                  <td>0.000047%</td>
+                  <td class="atom-count" data-label="Atoms">3</td>
+                  <td data-label="Insight Energy">-188.3479757</td>
+                  <td data-label="Psi4 Energy">-188.3480645</td>
+                  <td class="diff" data-label="Energy % Diff">-0.000047%</td>
+                  <td data-label="Insight Wall Time">0.917</td>
+                  <td data-label="Psi4 Wall Time">3.224</td>
+                  <td class="speedup" data-label="Insight Speedup">3.5 X</td>
                 </tr>
                 <tr>
                   <th scope="row">Acetone</th>
-                  <td>-192.893916221030</td>
-                  <td>-192.893890989144</td>
-                  <td>0.000013%</td>
+                  <td class="atom-count" data-label="Atoms">10</td>
+                  <td data-label="Insight Energy">-192.893899</td>
+                  <td data-label="Psi4 Energy">-192.8939162</td>
+                  <td class="diff" data-label="Energy % Diff">-0.000009%</td>
+                  <td data-label="Insight Wall Time">2.395</td>
+                  <td data-label="Psi4 Wall Time">15.566</td>
+                  <td class="speedup" data-label="Insight Speedup">6.5 X</td>
+                </tr>
+                <tr>
+                  <th scope="row">Benzaldehyde</th>
+                  <td class="atom-count" data-label="Atoms">14</td>
+                  <td data-label="Insight Energy">-345.1200463</td>
+                  <td data-label="Psi4 Energy">-345.1201236</td>
+                  <td class="diff" data-label="Energy % Diff">-0.000022%</td>
+                  <td data-label="Insight Wall Time">4.451</td>
+                  <td data-label="Psi4 Wall Time">44.301</td>
+                  <td class="speedup" data-label="Insight Speedup">10.0 X</td>
                 </tr>
                 <tr>
                   <th scope="row">Aspirin</th>
-                  <td>-647.872239176291</td>
-                  <td>-647.872027367449</td>
-                  <td>0.000033%</td>
+                  <td class="atom-count" data-label="Atoms">21</td>
+                  <td data-label="Insight Energy">-647.872061</td>
+                  <td data-label="Psi4 Energy">-647.8722392</td>
+                  <td class="diff" data-label="Energy % Diff">-0.000028%</td>
+                  <td data-label="Insight Wall Time">9.041</td>
+                  <td data-label="Psi4 Wall Time">103.717</td>
+                  <td class="speedup" data-label="Insight Speedup">11.5 X</td>
                 </tr>
                 <tr>
                   <th scope="row">Caffeine</th>
-                  <td>-679.519404072613</td>
-                  <td>-679.519148386103</td>
-                  <td>0.000038%</td>
+                  <td class="atom-count" data-label="Atoms">24</td>
+                  <td data-label="Insight Energy">-679.5191869</td>
+                  <td data-label="Psi4 Energy">-679.5194041</td>
+                  <td class="diff" data-label="Energy % Diff">-0.000032%</td>
+                  <td data-label="Insight Wall Time">11.444</td>
+                  <td data-label="Psi4 Wall Time">146.59</td>
+                  <td class="speedup" data-label="Insight Speedup">12.8 X</td>
                 </tr>
                 <tr>
                   <th scope="row">Nicotine</th>
-                  <td>-498.319170569034</td>
-                  <td>-498.319180328738</td>
-                  <td>0.000002%</td>
+                  <td class="atom-count" data-label="Atoms">26</td>
+                  <td data-label="Insight Energy">-498.3191882</td>
+                  <td data-label="Psi4 Energy">-498.3191706</td>
+                  <td class="diff" data-label="Energy % Diff">-0.000004%</td>
+                  <td data-label="Insight Wall Time">11.766</td>
+                  <td data-label="Psi4 Wall Time">149.208</td>
+                  <td class="speedup" data-label="Insight Speedup">12.7 X</td>
                 </tr>
                 <tr>
                   <th scope="row">Morphine</th>
-                  <td>-938.428502745943</td>
-                  <td>-938.428406909165</td>
-                  <td>0.000010%</td>
+                  <td class="atom-count" data-label="Atoms">40</td>
+                  <td data-label="Insight Energy">-938.4284213</td>
+                  <td data-label="Psi4 Energy">-938.4285027</td>
+                  <td class="diff" data-label="Energy % Diff">-0.000009%</td>
+                  <td data-label="Insight Wall Time">31.043</td>
+                  <td data-label="Psi4 Wall Time">429.569</td>
+                  <td class="speedup" data-label="Insight Speedup">13.8 X</td>
                 </tr>
                 <tr>
                   <th scope="row">Penicillin</th>
-                  <td>-1427.684967139940</td>
-                  <td>-1427.684698343900</td>
-                  <td>0.000019%</td>
-                </tr>
-                <tr>
-                  <th scope="row">Remdesivir</th>
-                  <td>-2318.942206176700</td>
-                  <td>-2318.941716913850</td>
-                  <td>0.000021%</td>
+                  <td class="atom-count" data-label="Atoms">41</td>
+                  <td data-label="Insight Energy">-1427.684754</td>
+                  <td data-label="Psi4 Energy">-1427.684967</td>
+                  <td class="diff" data-label="Energy % Diff">-0.000015%</td>
+                  <td data-label="Insight Wall Time">29.313</td>
+                  <td data-label="Psi4 Wall Time">362.543</td>
+                  <td class="speedup" data-label="Insight Speedup">12.4 X</td>
                 </tr>
                 <tr>
                   <th scope="row">Testosterone</th>
-                  <td>-890.174471556306</td>
-                  <td>-890.174557704175</td>
-                  <td>0.000010%</td>
+                  <td class="atom-count" data-label="Atoms">49</td>
+                  <td data-label="Insight Energy">-890.1746065</td>
+                  <td data-label="Psi4 Energy">-890.1744715</td>
+                  <td class="diff" data-label="Energy % Diff">-0.000015%</td>
+                  <td data-label="Insight Wall Time">43.278</td>
+                  <td data-label="Psi4 Wall Time">612.377</td>
+                  <td class="speedup" data-label="Insight Speedup">14.1 X</td>
                 </tr>
                 <tr>
-                  <th scope="row">VitA</th>
-                  <td>-854.211980316497</td>
-                  <td>-854.211428415530</td>
-                  <td>0.000065%</td>
+                  <th scope="row">VitaminA</th>
+                  <td class="atom-count" data-label="Atoms">51</td>
+                  <td data-label="Insight Energy">-854.212013</td>
+                  <td data-label="Psi4 Energy">-854.2119803</td>
+                  <td class="diff" data-label="Energy % Diff">-0.000004%</td>
+                  <td data-label="Insight Wall Time">44.433</td>
+                  <td data-label="Psi4 Wall Time">466.345</td>
+                  <td class="speedup" data-label="Insight Speedup">10.5 X</td>
                 </tr>
                 <tr>
-                  <th scope="row">VitD3</th>
-                  <td>-1129.052943728480</td>
-                  <td>-1129.053100993590</td>
-                  <td>0.000014%</td>
+                  <th scope="row">VitaminD3</th>
+                  <td class="atom-count" data-label="Atoms">72</td>
+                  <td data-label="Insight Energy">-1129.053173</td>
+                  <td data-label="Psi4 Energy">-1129.052944</td>
+                  <td class="diff" data-label="Energy % Diff">0.000020%</td>
+                  <td data-label="Insight Wall Time">122.921</td>
+                  <td data-label="Psi4 Wall Time">1013.955</td>
+                  <td class="speedup" data-label="Insight Speedup">8.2 X</td>
                 </tr>
                 <tr>
-                  <th scope="row">VitK</th>
-                  <td>-1357.666469150910</td>
-                  <td>-1357.666344115740</td>
-                  <td>0.000009%</td>
+                  <th scope="row">Remdesivir</th>
+                  <td class="atom-count" data-label="Atoms">77</td>
+                  <td data-label="Insight Energy">-2318.94185</td>
+                  <td data-label="Psi4 Energy">-2318.942206</td>
+                  <td class="diff" data-label="Energy % Diff">-0.000015%</td>
+                  <td data-label="Insight Wall Time">179.197</td>
+                  <td data-label="Psi4 Wall Time">1301.591</td>
+                  <td class="speedup" data-label="Insight Speedup">7.3 X</td>
                 </tr>
                 <tr>
-                  <th scope="row">VitE</th>
-                  <td>-1283.980929308280</td>
-                  <td>-1283.981155853020</td>
-                  <td>0.000018%</td>
+                  <th scope="row">VitaminK</th>
+                  <td class="atom-count" data-label="Atoms">79</td>
+                  <td data-label="Insight Energy">-1357.66661</td>
+                  <td data-label="Psi4 Energy">-1357.666469</td>
+                  <td class="diff" data-label="Energy % Diff">0.000010%</td>
+                  <td data-label="Insight Wall Time">163.835</td>
+                  <td data-label="Psi4 Wall Time">1391.466</td>
+                  <td class="speedup" data-label="Insight Speedup">8.5 X</td>
+                </tr>
+                <tr>
+                  <th scope="row">VitaminE</th>
+                  <td class="atom-count" data-label="Atoms">81</td>
+                  <td data-label="Insight Energy">-1283.981159</td>
+                  <td data-label="Psi4 Energy">-1283.980929</td>
+                  <td class="diff" data-label="Energy % Diff">-0.000018%</td>
+                  <td data-label="Insight Wall Time">164.346</td>
+                  <td data-label="Psi4 Wall Time">1393.698</td>
+                  <td class="speedup" data-label="Insight Speedup">8.5 X</td>
                 </tr>
               </tbody>
             </table>
           </div>
 
           <div class="fineprint">
-            Energies are reported in Hartree. Error is the relative difference from Psi4.
+            Energies are reported in Hartree. Wall times are seconds. Energy % Diff is the relative difference from Psi4.
           </div>
         </div>
 
-        <div class="info-card">
-          <div class="info-title">What you get today</div>
-          <ul class="bullets">
-            <li>Stress tested on systems up to 100 atoms</li>
-            <li>Point solves (KS-DFT) using def2-SVP and r2SCAN</li>
-            <li>Geometry Optimization</li>
-            <li>Born-Oppenheimer Molecular Dynamics</li>
-            <li>Density visualization (volume + isosurface)</li>
-            <li>Web-first workflow</li>
-          </ul>
+        <div class="info-card feature-card">
+          <div class="feature-columns">
+            <section class="feature-column">
+              <div class="info-title">What you get today</div>
+              <ul class="bullets">
+                <li>Stress tested on systems up to 100 atoms</li>
+                <li>Point solves (KS-DFT) using def2-SVP and r2SCAN</li>
+                <li>Geometry Optimization</li>
+                <li>Born-Oppenheimer Molecular Dynamics</li>
+                <li>Density visualization (volume + isosurface)</li>
+                <li>Web-first workflow</li>
+              </ul>
+            </section>
 
-          <div class="divider"></div>
-
-          <div class="info-title">Coming soon</div>
-          <ul class="bullets muted">
-            <li>More basis function and Exc functional options</li>
-            <li>Linearly scaling computation on large systems</li>
-            <li>Better reporting/export (energies, orbitals, density grids, etc.)</li>
-            <li>ML Accelerated QMMD</li>
-            <li>Excited States</li>
-          </ul>
+            <section class="feature-column feature-column--soon">
+              <div class="info-title">Coming soon</div>
+              <ul class="bullets muted">
+                <li>More basis function and Exc functional options</li>
+                <li>Linearly scaling computation on large systems</li>
+                <li>Better reporting/export (energies, orbitals, density grids, etc.)</li>
+                <li>ML Accelerated QMMD</li>
+                <li>Excited States</li>
+              </ul>
+            </section>
+          </div>
         </div>
       </div>
 
@@ -245,7 +340,6 @@
       window.dispatchEvent(new Event("topbar:ready"));
     });
   </script>
-  <script type="module" src="/src/demo-banner.js"></script>
   <script type="module" src="/src/auth.js"></script>
   <script type="module" src="/src/topbar.js"></script>
 </body>

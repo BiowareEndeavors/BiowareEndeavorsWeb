@@ -1,5 +1,6 @@
 # functions/main.py
 from __future__ import annotations
+import re
 import requests
 
 from typing import Any, List, Dict, Optional
@@ -44,6 +45,15 @@ DEFAULT_MD_TIME_STEP_FS = 0.25
 MIN_MD_TIME_STEP_FS = 0.001
 MAX_MD_TIME_STEP_FS = 10.0
 DEFAULT_MD_TRAJECTORY_FILE = "md_trajectory.json"
+DEFAULT_SYSTEM_CHARGE = 0
+
+
+SYSTEM_CHARGE_TAG_RE = re.compile(
+    r"<(?:[A-Za-z_][\w.-]*:)?SystemCharge\b[^>]*>[\s\S]*?</(?:[A-Za-z_][\w.-]*:)?SystemCharge>"
+)
+DFT_SETTINGS_CLOSE_RE = re.compile(r"</(?:[A-Za-z_][\w.-]*:)?DFTSettings\s*>")
+PC_COMPOUND_CLOSE_RE = re.compile(r"</(?:[A-Za-z_][\w.-]*:)?PC-Compound\s*>")
+PC_COMPOUNDS_CLOSE_RE = re.compile(r"</(?:[A-Za-z_][\w.-]*:)?PC-Compounds\s*>")
 
 
 def normalize_job_mode(raw_mode: Any) -> str:
@@ -173,6 +183,51 @@ def normalize_max_runtime_sec(raw_value: Any) -> int:
     return value
 
 
+def normalize_system_charge(raw_value: Any) -> int:
+    if raw_value in (None, ""):
+        return DEFAULT_SYSTEM_CHARGE
+
+    if isinstance(raw_value, bool):
+        raise https_fn.HttpsError(
+            code=https_fn.FunctionsErrorCode.INVALID_ARGUMENT,
+            message="system_charge must be a whole number.",
+        )
+
+    text = str(raw_value).strip()
+    if not re.fullmatch(r"[+-]?\d+", text):
+        raise https_fn.HttpsError(
+            code=https_fn.FunctionsErrorCode.INVALID_ARGUMENT,
+            message="system_charge must be a whole number.",
+        )
+
+    return int(text)
+
+
+def upsert_system_charge_xml(molecule_xml: str, system_charge: int) -> str:
+    xml_text = str(molecule_xml or "").strip()
+    if not xml_text:
+        return xml_text
+
+    charge_block = f"<SystemCharge>{int(system_charge)}</SystemCharge>"
+    if SYSTEM_CHARGE_TAG_RE.search(xml_text):
+        return SYSTEM_CHARGE_TAG_RE.sub(charge_block, xml_text, count=1)
+
+    dft_close = DFT_SETTINGS_CLOSE_RE.search(xml_text)
+    if dft_close:
+        return f"{xml_text[:dft_close.start()]}{charge_block}{xml_text[dft_close.start():]}"
+
+    settings_block = f"<DFTSettings>{charge_block}</DFTSettings>"
+    compound_close = PC_COMPOUND_CLOSE_RE.search(xml_text)
+    if compound_close:
+        return f"{xml_text[:compound_close.start()]}{settings_block}{xml_text[compound_close.start():]}"
+
+    compounds_close = PC_COMPOUNDS_CLOSE_RE.search(xml_text)
+    if compounds_close:
+        return f"{xml_text[:compounds_close.start()]}{settings_block}{xml_text[compounds_close.start():]}"
+
+    return f"{settings_block}{xml_text}"
+
+
 def normalize_md_config(data: Dict[str, Any], mode: str) -> Optional[Dict[str, Any]]:
     if mode != "molecular_dynamics":
         return None
@@ -282,6 +337,54 @@ def normalize_md_continuation(data: Dict[str, Any], mode: str) -> Optional[Dict[
     }
 
 
+def get_stored_system_charge(job: Dict[str, Any]) -> Optional[int]:
+    for key in ("systemCharge", "system_charge", "totalSystemCharge"):
+        if key in job and job.get(key) not in (None, ""):
+            return normalize_system_charge(job.get(key))
+    return None
+
+
+def resolve_md_continuation_system_charge(
+    db: Any,
+    uid: str,
+    md_continuation: Optional[Dict[str, Any]],
+    requested_system_charge: int,
+) -> int:
+    if not md_continuation:
+        return requested_system_charge
+
+    parent_job_id = str(md_continuation.get("parentJobId") or "").strip()
+    root_job_id = str(md_continuation.get("rootJobId") or "").strip()
+    seen_job_ids = set()
+
+    for job_id in (parent_job_id, root_job_id):
+        if not job_id or job_id in seen_job_ids:
+            continue
+        seen_job_ids.add(job_id)
+
+        snap = db.collection("jobs").document(job_id).get()
+        if not snap.exists:
+            if job_id == parent_job_id:
+                raise https_fn.HttpsError(
+                    code=https_fn.FunctionsErrorCode.NOT_FOUND,
+                    message="Parent MD job not found.",
+                )
+            continue
+
+        job = snap.to_dict() or {}
+        if job.get("uid") != uid:
+            raise https_fn.HttpsError(
+                code=https_fn.FunctionsErrorCode.PERMISSION_DENIED,
+                message="Not allowed.",
+            )
+
+        stored_system_charge = get_stored_system_charge(job)
+        if stored_system_charge is not None:
+            return stored_system_charge
+
+    return DEFAULT_SYSTEM_CHARGE
+
+
 def validate_md_xml(molecule_xml: str, mode: str) -> None:
     if mode != "molecular_dynamics":
         return
@@ -352,8 +455,18 @@ def submit_molecule(req: https_fn.CallableRequest) -> Any:
     job_type = get_runpod_job_type_for_mode(mode)
     hardware_tier = normalize_hardware_tier(data.get("hardware_tier"))
     max_runtime_sec = normalize_max_runtime_sec(data.get("max_runtime_sec"))
+    requested_system_charge = normalize_system_charge(
+        data.get("system_charge", data.get("systemCharge", data.get("totalSystemCharge")))
+    )
     md_config = normalize_md_config(data, mode)
     md_continuation = normalize_md_continuation(data, mode)
+    system_charge = resolve_md_continuation_system_charge(
+        db,
+        uid,
+        md_continuation,
+        requested_system_charge,
+    )
+    molecule_xml = upsert_system_charge_xml(molecule_xml, system_charge)
     runpod_endpoint = get_runpod_endpoint_for_tier(hardware_tier, fallback="budget")
     runpod_health_summary = None
     try:
@@ -374,11 +487,12 @@ def submit_molecule(req: https_fn.CallableRequest) -> Any:
                 ),
             )
     logging.info(
-        "submit_molecule routing: mode=%s job_type=%s hardware_tier=%s max_runtime_sec=%s endpoint=%s",
+        "submit_molecule routing: mode=%s job_type=%s hardware_tier=%s max_runtime_sec=%s system_charge=%s endpoint=%s",
         mode,
         job_type,
         hardware_tier,
         max_runtime_sec,
+        system_charge,
         runpod_endpoint,
     )
 
@@ -391,6 +505,7 @@ def submit_molecule(req: https_fn.CallableRequest) -> Any:
         mode=mode,
         hardware_tier=hardware_tier,
         max_runtime_sec=max_runtime_sec,
+        system_charge=system_charge,
         runpod_endpoint=runpod_endpoint,
         md_config=md_config,
     )
@@ -416,6 +531,7 @@ def submit_molecule(req: https_fn.CallableRequest) -> Any:
         mode=mode,
         hardware_tier=hardware_tier,
         max_runtime_sec=max_runtime_sec,
+        system_charge=system_charge,
         runpod_endpoint=runpod_endpoint,
         input_xml_ref=input_xml_ref,
         input_xml_upload_error=input_xml_upload_error,
@@ -432,6 +548,7 @@ def submit_molecule(req: https_fn.CallableRequest) -> Any:
         "job_type": job_type,
         "hardware_tier": hardware_tier,
         "max_runtime_sec": max_runtime_sec,
+        "system_charge": system_charge,
         "runpod_endpoint": runpod_endpoint,
         "jobId": job_doc_id,
         "filename": filename,
